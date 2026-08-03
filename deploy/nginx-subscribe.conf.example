@@ -1,16 +1,18 @@
-# Lynx v2.1.0 — 订阅反代（nginx + 公网证书）
-# origin：http://127.0.0.1:8080/_lynx/v1/subscribe/<token>
+# Lynx v2.1.0 — subscribe reverse proxy (nginx + public cert)
+# Origin: http://127.0.0.1:8080/_lynx/v1/subscribe/<token>
 #
-# 端口：
-#   订阅 → HTTPS 443（本文件）
-#   直连 mTLS → lynx-server direct_listen :8443（勿与订阅共用）
+# Ports:
+#   Subscribe → HTTPS 443 (this file)
+#   Direct mTLS → lynx-server direct_listen :8443 (do not share with subscribe)
 #
-# server.json 对应字段：
+# server.json:
 #   "direct_listen": ":8443"
 #   "public_base_url": "https://subscribe.example.com"
 #   "cdn_base_url": "https://cdn.example.com"
+#
+# Docs: docs/configuration.md · docs/configuration.zh-CN.md
 
-# 嵌入现有 listen 443 ssl 的 server，且写在 location / 之前：
+# Embed into an existing listen 443 ssl server, before location / :
 location ^~ /_lynx/v1/subscribe {
     proxy_pass http://127.0.0.1:8080;
     proxy_http_version 1.1;
@@ -26,16 +28,16 @@ location ^~ /_lynx/v1/subscribe {
     add_header Cache-Control "no-store" always;
 }
 
-# 或独立 server_name（仍用 443）：
+# Or a dedicated server_name (still 443):
 # server {
 #     listen 443 ssl;
 #     server_name subscribe.example.com;
 #     ssl_certificate     /path/to/fullchain.pem;
 #     ssl_certificate_key /path/to/privkey.pem;
-#     location ^~ /_lynx/v1/subscribe { ... 同上 ... }
+#     location ^~ /_lynx/v1/subscribe { ... same as above ... }
 # }
 #
-# 自检：
+# Self-check:
 #   lynx-server -version
 #   curl -sS http://127.0.0.1:8080/_lynx/v1/version
 #   sudo lynx-wizard --show-subscribe

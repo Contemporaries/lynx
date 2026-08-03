@@ -1,73 +1,94 @@
-# 一键部署（Linux）
+# One-click deploy (Linux)
 
-面向 Lynx **v2.1.0**：本机 SOCKS5/HTTP，订阅走 nginx 443，直连 mTLS 8443，WSS 走 Cloudflare Tunnel。
+**English** | [中文](ONE_CLICK.zh-CN.md)
 
-## 准备
+For Lynx **v2.1.0**: local SOCKS5/HTTP; subscribe via nginx **443**; direct mTLS **8443**; WSS via Cloudflare Tunnel.
 
-- 已托管在 Cloudflare 的 CDN 子域名（WSS）
-- 已有公网证书的订阅域名 + nginx（443）
-- 本机可构建或已有 Release 二进制（`./deploy/build.sh`）
+Deep dives: [docs/configuration.md](docs/configuration.md) · [docs/cloudflare.md](docs/cloudflare.md) · [docs/security.md](docs/security.md).
 
-## 首次部署服务端
+## Before you start
+
+1. CDN hostname already on Cloudflare (e.g. `cdn.example.com`) for WSS
+2. Subscribe hostname with a public certificate + nginx (e.g. `subscribe.example.com`, default **443** — do **not** use direct port **8443**)
+3. Optional: open **TCP 8443** if you want direct acceleration
+4. Browser available for `cloudflared tunnel login`
+
+## Deploy server
 
 ```bash
-cd lynx
 ./deploy/build.sh
 sudo ./lynx-wizard.sh
+# equivalent: sudo ./install.sh
 ```
 
-按提示填写：
+Wizard prompts (typical):
 
-1. CDN 域名（如 `cdn.example.com`）
-2. 订阅域名（如 `subscribe.example.com`，默认 443，勿与直连 8443 冲突）
-3. 是否启用直连（开放 TCP 8443）
-4. 首台设备名
+1. CDN hostname — e.g. `cdn.example.com`
+2. Subscribe hostname — e.g. `subscribe.example.com`
+3. Enable direct? (open TCP 8443) — default no
+4. Direct hostname if enabled — e.g. `direct.example.com` (**DNS only** / grey cloud)
+5. First device name — default `laptop`
+6. Optional Cloudflare Access Service Token (Client-Id / Secret)
 
-完成后：
+What the wizard sets up:
 
-- `lynx-server` / `lynx-cloudflared` 以用户 `lynx` 运行
-- 打印订阅 URL 与客户端包路径
-- 配置 nginx：见 [deploy/nginx-subscribe.conf.example](deploy/nginx-subscribe.conf.example)
+- `lynx-server` / `lynx-cloudflared` (and related paths under `/etc/lynx`)
+- PKI under `/etc/lynx/pki` and `/etc/lynx/certs` — **back up `ca.key`**
+- Tunnel ingress: only `/_lynx/v1/connect` → `127.0.0.1:8080`
+- Client bundle with subscribe URL (and direct fields if enabled)
 
-请备份 `/etc/lynx/pki/ca.key`。
+Then add nginx for subscribe: [deploy/nginx-subscribe.conf.example](deploy/nginx-subscribe.conf.example).
 
-## 添加设备
+```bash
+sudo lynx-wizard --show-subscribe
+sudo systemctl status lynx-server lynx-cloudflared
+```
+
+Expected prints:
+
+```text
+Cloudflare proxy entry: wss://cdn.example.com/_lynx/v1/connect
+Subscribe URL: https://subscribe.example.com/_lynx/v1/subscribe/<token>
+```
+
+If direct is on, also ensure security group TCP 8443 and grey-cloud DNS for the direct name.
+
+## Add a device
 
 ```bash
 sudo lynx-wizard --add-device
+# or menu option in lynx-wizard.sh
 ```
 
-客户端包内含单文件 `client.json`（`subscribe_url`）及可选 `lynx-client` 二进制与 `install-client.sh`。
+## Install client (Linux)
 
-## 安装客户端
+Use the generated package / instructions from the wizard (typically install binary + `client.json` + systemd `lynx-client`).
+
+Or manually:
 
 ```bash
-# 解压客户端包后
-sudo ./install-client.sh
-
-# 或
-lynx-client -subscribe 'https://subscribe.example.com/_lynx/v1/subscribe/<token>' \
+sudo install -m 755 lynx-client-linux-amd64 /usr/local/bin/lynx-client
+sudo lynx-client -subscribe 'https://subscribe.example.com/_lynx/v1/subscribe/<token>' \
   -config /etc/lynx/client.json
 ```
 
-首次启动会拉取证书并写回同一 `client.json`。
-
-## 验证
+## Verify
 
 ```bash
 curl --socks5-hostname 127.0.0.1:1080 https://ifconfig.me
-sudo lynx-wizard --show-subscribe
-curl -sS http://127.0.0.1:8080/_lynx/v1/version
+curl -x http://127.0.0.1:8080 https://ifconfig.me
 ```
 
-## 常用命令
+## Useful wizard commands
 
 ```bash
 sudo lynx-wizard --status
-sudo lynx-wizard --upgrade-server
-sudo lynx-wizard --upgrade-client
-sudo ./deploy/uninstall-client.sh
+sudo lynx-wizard --show-subscribe
+sudo lynx-wizard --add-device
+sudo lynx-wizard --upgrade-server [tag]
+sudo lynx-wizard --upgrade-client [tag]
+sudo lynx-wizard --uninstall-client
 sudo lynx-wizard --uninstall
 ```
 
-更多：[docs/upgrade.md](docs/upgrade.md)、[docs/uninstall.md](docs/uninstall.md)。
+Interactive menu: first deploy, add device, status, subscribe probe, upgrades, uninstall.

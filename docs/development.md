@@ -1,51 +1,57 @@
-# 开发与构建
+# Development
 
-当前版本：**v2.1.0**。
+**English** | [中文](development.zh-CN.md)
 
-## 依赖
+Build and test Lynx **v2.1.0** from source.
 
-| 组件 | 版本 | 用途 |
-|---|---|---|
-| Go | 1.24+ | 服务端 / CLI |
-| Git | 任意 | 克隆 |
-| OpenSSL | 3.x | 证书（可选，向导也会生成） |
+## Requirements
 
-Linux 部署另需：`systemd`；可选 `cloudflared`、`nginx`。
+| Dependency | Notes |
+|---|---|
+| Go **1.24+** | `go.mod` |
+| Git | Clone |
+| Linux deploy extras | `systemd`; optional `cloudflared`, `nginx` |
 
-## 安装 Go
+No external Go module dependencies beyond the standard library (see `go.mod`).
+
+## Install Go
+
+Follow https://go.dev/dl/ for your OS. Confirm:
 
 ```bash
-curl -fsSL https://go.dev/dl/go1.24.5.linux-amd64.tar.gz -o /tmp/go.tar.gz
-sudo rm -rf /usr/local/go
-sudo tar -C /usr/local -xzf /tmp/go.tar.gz
-echo 'export PATH=/usr/local/go/bin:$HOME/go/bin:$PATH' >> ~/.bashrc
-source ~/.bashrc
 go version
 ```
 
-## 克隆与测试
+If downloads are slow, set a module proxy (example for mainland China):
+
+```bash
+export GOPROXY=https://goproxy.cn,direct
+```
+
+## Clone and test
 
 ```bash
 git clone https://github.com/Contemporaries/lynx.git
 cd lynx
 go test ./...
-go vet ./...
 ```
 
-## 构建发布物
+## Release-style binaries
 
 ```bash
 ./deploy/build.sh
-ls dist/
 ```
 
-- `lynx-server-linux-amd64` / `lynx-server-linux-arm64`
-- `lynx-client-linux-amd64` / `lynx-client-linux-arm64`
-- `lynx-client-windows-amd64.exe`
-- `SHA256SUMS`
+Artifacts land under `dist/` (server/client for linux amd64/arm64, Windows client, checksums as produced by the script).
 
-## 模块代理（可选）
+## Local run (sketch)
 
-```bash
-export GOPROXY=https://proxy.golang.org,direct
-```
+1. Prepare `configs/server.json` / PKI paths (or copy a lab layout under `/etc/lynx`).
+2. Run `lynx-server -config …`
+3. Run `lynx-client -config …` or `-subscribe …`
+4. For WSS without Cloudflare, you can still hit `ws_listen` locally; production WSS expects Tunnel as in [cloudflare.md](cloudflare.md).
+
+## Related
+
+- [configuration.md](configuration.md) — runtime config  
+- [ONE_CLICK.md](../ONE_CLICK.md) — production wizard  

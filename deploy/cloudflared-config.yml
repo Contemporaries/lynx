@@ -1,3 +1,5 @@
+# Example cloudflared ingress for Lynx WSS (wizard writes /etc/lynx/cloudflared.yml).
+# Docs: docs/cloudflare.md · docs/cloudflare.zh-CN.md
 tunnel: REPLACE_WITH_TUNNEL_UUID
 credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_UUID.json
 

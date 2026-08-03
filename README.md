@@ -1,115 +1,124 @@
 # Lynx
 
-Lynx **v2.1.0** 是一套加密 TCP 代理：客户端在本机提供 SOCKS5 / HTTP，经直连 mTLS 或 Cloudflare WebSocket 到达服务端；内层为 TLS 1.3 + 每设备 mTLS。
+**English** | [中文](README.zh-CN.md)
 
-不是系统 VPN：不创建 TUN，不改默认路由或系统 DNS。
+Lynx **v2.1.0** is an encrypted TCP proxy: apps use local SOCKS5 / HTTP, and the client reaches the server over **direct mTLS** or **Cloudflare WebSocket**. The inner tunnel is TLS 1.3 with per-device mTLS.
+
+It is **not** a system VPN: no TUN device, no default route or system DNS changes.
 
 ```text
-应用程序
+Application
   ├─ SOCKS5 127.0.0.1:1080
   └─ HTTP   127.0.0.1:8080
              │
-        Lynx 客户端（单文件 client.json）
+        Lynx client (single-file client.json)
              │
     ┌────────┴─────────┐
     │                  │
-直连 mTLS :8443    Cloudflare WSS
+Direct mTLS :8443   Cloudflare WSS
     │                  │
-    └──── Lynx 服务端 ──── Internet
+    └──── Lynx server ──── Internet
               ▲
-         内层 TLS 1.3 + mTLS
+         Inner TLS 1.3 + mTLS
 ```
 
-## 当前能力
+## Features
 
-- 单文件客户端：`client.json`（`subscribe_url` 和/或内联 `certificate` / `key` / `certificate_authority`）
-- 订阅：`https://subscribe.example.com/_lynx/v1/subscribe/<token>`（nginx **443** path）
-- 直连：`direct_listen` 默认 **:8443**（mTLS）
-- 数据面：Cloudflare WSS + 内层端到端 TLS（CDN 看不到代理明文）
-- 本地 SOCKS5（TCP CONNECT）与 HTTP / HTTP CONNECT
-- 多路复用连接池；默认禁止代理到私有网段
-- 非本机监听时强制本地代理认证
-- Linux / Windows CLI；systemd 一键部署
+- Single-file client: `client.json` (`subscribe_url` and/or inline `certificate` / `key` / `certificate_authority`)
+- Subscribe: `https://subscribe.example.com/_lynx/v1/subscribe/<token>` (nginx **443** path)
+- Direct: `direct_listen` default **:8443** (mTLS)
+- Data plane: Cloudflare WSS + end-to-end inner TLS (CDN cannot read proxy plaintext)
+- Local SOCKS5 (TCP CONNECT) and HTTP / HTTP CONNECT
+- Multiplexed connection pool; private destinations blocked by default
+- Non-loopback local listen requires proxy authentication
+- Linux / Windows CLI; systemd one-click deploy
 
-## 非目标
+## Non-goals
 
-- 系统级 VPN / 全局路由
+- System VPN / global routing
 - UDP / QUIC / SOCKS5 UDP ASSOCIATE
-- 尚未经过独立安全审计
+- Independent security audit (not done yet)
 
-## 端口约定
+## Ports
 
-| 用途 | 默认 |
+| Use | Default |
 |---|---|
-| 订阅（nginx → origin `127.0.0.1:8080`） | HTTPS **443**（path `/_lynx/v1/subscribe/`） |
-| 直连 mTLS | TCP **8443** |
-| 服务端 WebSocket origin | `127.0.0.1:8080`（Tunnel 仅放行 connect） |
-| 客户端 SOCKS5 / HTTP | `127.0.0.1:1080` / `127.0.0.1:8080` |
+| Subscribe (nginx → origin `127.0.0.1:8080`) | HTTPS **443** (`/_lynx/v1/subscribe/`) |
+| Direct mTLS | TCP **8443** |
+| Server WebSocket origin | `127.0.0.1:8080` (Tunnel allows connect only) |
+| Client SOCKS5 / HTTP | `127.0.0.1:1080` / `127.0.0.1:8080` |
 
-订阅与直连不可共用同一端口。
+Subscribe and direct must not share the same port.
 
-## 直连与 WSS
+## Direct vs WSS (summary)
 
-| | 直连 mTLS | Cloudflare WSS |
+| | Direct mTLS | Cloudflare WSS |
 |---|---|---|
-| 链路 | 客户端 → 公网 **:8443** → 服务端 | 客户端 → Cloudflare Tunnel → 本机 origin |
-| 延迟 / 吞吐 | 通常更好 | 多一跳 CDN，一般略慢 |
-| 网络兼容 | 依赖 8443 可达 | 走 443，防火墙下往往更容易 |
-| 暴露面 | 需开放 TCP **8443** | 可不对公网开直连口 |
-| 元数据 | 直达你的服务器 | CF 可见连接元数据，不能解内层 TLS |
+| Path | Client → public **:8443** → server | Client → Cloudflare Tunnel → localhost origin |
+| Latency / throughput | Usually better | Extra CDN hop; often a bit slower |
+| Firewall friendliness | Needs 8443 reachable | Uses 443; often easier |
+| Exposure | Open TCP **8443** | Direct port can stay closed |
+| Metadata | Straight to your server | CF sees connection metadata; cannot decrypt inner TLS |
 
-客户端 `mode`：`direct` / `wss` / `auto`（默认先试直连，失败回退 WSS）。完整对比与如何判断当前路径见 [docs/transport.md](docs/transport.md)。
+Client `mode`: `direct` / `wss` / `auto` (default: try direct, fall back to WSS). Full comparison: [docs/transport.md](docs/transport.md).
 
-## 下载
+## Download
 
 **https://github.com/Contemporaries/lynx/releases**
 
-| 产物 | 说明 |
+| Artifact | Notes |
 |---|---|
-| `lynx-server-linux-amd64` / `arm64` | 服务端 |
-| `lynx-client-linux-amd64` / `arm64` | Linux 客户端 |
-| `lynx-client-windows-amd64.exe` | Windows 客户端 |
-| `SHA256SUMS` | 校验和 |
+| `lynx-server-linux-amd64` / `arm64` | Server |
+| `lynx-client-linux-amd64` / `arm64` | Linux client |
+| `lynx-client-windows-amd64.exe` | Windows client |
+| `SHA256SUMS` | Checksums |
 
-## 文档
+## Documentation
 
-| 文档 | 内容 |
+| Doc | Contents |
 |---|---|
-| [ONE_CLICK.md](ONE_CLICK.md) | Linux 一键部署 |
-| [docs/transport.md](docs/transport.md) | 直连 mTLS 与 Cloudflare WSS 对比 |
-| [docs/development.md](docs/development.md) | 开发与本地构建 |
-| [docs/windows.md](docs/windows.md) | Windows 客户端 |
-| [docs/upgrade.md](docs/upgrade.md) | 升级与发布 |
-| [docs/uninstall.md](docs/uninstall.md) | 卸载 |
+| [ONE_CLICK.md](ONE_CLICK.md) | Linux one-click deploy |
+| [docs/configuration.md](docs/configuration.md) | Config steps, nginx, server/client JSON |
+| [docs/cloudflare.md](docs/cloudflare.md) | Tunnel, DNS, Access, WSS path |
+| [docs/security.md](docs/security.md) | mTLS, tokens, limits, CDN visibility |
+| [docs/transport.md](docs/transport.md) | Direct vs WSS |
+| [docs/development.md](docs/development.md) | Build from source |
+| [docs/windows.md](docs/windows.md) | Windows client |
+| [docs/upgrade.md](docs/upgrade.md) | Upgrade and releases |
+| [docs/uninstall.md](docs/uninstall.md) | Uninstall |
 
-## 快速开始
+中文文档：见各文件的 `*.zh-CN.md`（例如 [README.zh-CN.md](README.zh-CN.md)）。
 
-### 构建
+## Quick start
+
+### Build
 
 ```bash
-# 需要 Go 1.24+
+# Go 1.24+
 go test ./...
 ./deploy/build.sh
 ```
 
-详见 [docs/development.md](docs/development.md)。
+See [docs/development.md](docs/development.md).
 
-### 服务端（推荐向导）
+### Server (recommended: wizard)
 
 ```bash
 ./deploy/build.sh
 sudo ./lynx-wizard.sh
 ```
 
-向导会配置 Cloudflare Tunnel、PKI、`server.json`，并生成客户端包。订阅 URL 形如：
+The wizard configures Cloudflare Tunnel, PKI, `server.json`, and a client bundle. Subscribe URL shape:
 
 ```text
 https://subscribe.example.com/_lynx/v1/subscribe/<token>
 ```
 
-nginx 片段：[deploy/nginx-subscribe.conf.example](deploy/nginx-subscribe.conf.example)。请备份 `/etc/lynx/pki/ca.key`。
+nginx snippet: [deploy/nginx-subscribe.conf.example](deploy/nginx-subscribe.conf.example). Back up `/etc/lynx/pki/ca.key`.
 
-### 服务端配置要点
+Detailed steps: [docs/configuration.md](docs/configuration.md) · Cloudflare: [docs/cloudflare.md](docs/cloudflare.md).
+
+### Server config (essentials)
 
 ```json
 {
@@ -130,9 +139,9 @@ nginx 片段：[deploy/nginx-subscribe.conf.example](deploy/nginx-subscribe.conf
 }
 ```
 
-完整样例：[configs/server.json](configs/server.json)、[configs/client.json](configs/client.json)。
+Full samples: [configs/server.json](configs/server.json), [configs/client.json](configs/client.json).
 
-### 客户端
+### Client
 
 ```bash
 lynx-client -subscribe 'https://subscribe.example.com/_lynx/v1/subscribe/<token>' \
@@ -141,7 +150,7 @@ lynx-client -subscribe 'https://subscribe.example.com/_lynx/v1/subscribe/<token>
 lynx-client -config /etc/lynx/client.json
 ```
 
-最小配置：
+Minimal config:
 
 ```json
 {
@@ -149,19 +158,19 @@ lynx-client -config /etc/lynx/client.json
 }
 ```
 
-订阅成功后，同一文件会写入内联 PEM。验证：
+After a successful subscribe, the same file receives inline PEMs. Verify:
 
 ```bash
 curl --socks5-hostname 127.0.0.1:1080 https://ifconfig.me
 curl -x http://127.0.0.1:8080 https://ifconfig.me
 ```
 
-Windows 见 [docs/windows.md](docs/windows.md)。
+Windows: [docs/windows.md](docs/windows.md).
 
-## 升级 / 卸载
+## Upgrade / uninstall
 
-- 升级：[docs/upgrade.md](docs/upgrade.md)
-- 卸载：[docs/uninstall.md](docs/uninstall.md)
+- Upgrade: [docs/upgrade.md](docs/upgrade.md)
+- Uninstall: [docs/uninstall.md](docs/uninstall.md)
 
 ```bash
 sudo ./deploy/upgrade-server.sh
@@ -170,12 +179,14 @@ sudo ./deploy/uninstall-client.sh
 sudo lynx-wizard --uninstall
 ```
 
-## 安全说明
+## Security (short)
 
-- 设备授权：客户端证书 SHA-256 指纹 + `enabled`
-- 订阅 token 等同密钥，泄露则轮换 `subscribe_token` 或禁用设备
-- 速率限制见服务端 `security`
-- Cloudflare 可见域名、源 IP、时长与流量体积，无法解密内层 TLS
+- Device auth: client certificate SHA-256 fingerprint + `enabled`
+- Subscribe token is a secret; rotate `subscribe_token` or disable the device if leaked
+- Rate limits: server `security` block
+- Cloudflare sees hostname, client IP, duration, and volume — not inner TLS plaintext
+
+Full write-up: [docs/security.md](docs/security.md).
 
 ## License
 
