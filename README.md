@@ -48,6 +48,18 @@ Lynx **v2.1.0** 是一套加密 TCP 代理：客户端在本机提供 SOCKS5 / H
 
 订阅与直连不可共用同一端口。
 
+## 直连与 WSS
+
+| | 直连 mTLS | Cloudflare WSS |
+|---|---|---|
+| 链路 | 客户端 → 公网 **:8443** → 服务端 | 客户端 → Cloudflare Tunnel → 本机 origin |
+| 延迟 / 吞吐 | 通常更好 | 多一跳 CDN，一般略慢 |
+| 网络兼容 | 依赖 8443 可达 | 走 443，防火墙下往往更容易 |
+| 暴露面 | 需开放 TCP **8443** | 可不对公网开直连口 |
+| 元数据 | 直达你的服务器 | CF 可见连接元数据，不能解内层 TLS |
+
+客户端 `mode`：`direct` / `wss` / `auto`（默认先试直连，失败回退 WSS）。完整对比与如何判断当前路径见 [docs/transport.md](docs/transport.md)。
+
 ## 下载
 
 **https://github.com/Contemporaries/lynx/releases**
@@ -64,6 +76,7 @@ Lynx **v2.1.0** 是一套加密 TCP 代理：客户端在本机提供 SOCKS5 / H
 | 文档 | 内容 |
 |---|---|
 | [ONE_CLICK.md](ONE_CLICK.md) | Linux 一键部署 |
+| [docs/transport.md](docs/transport.md) | 直连 mTLS 与 Cloudflare WSS 对比 |
 | [docs/development.md](docs/development.md) | 开发与本地构建 |
 | [docs/windows.md](docs/windows.md) | Windows 客户端 |
 | [docs/upgrade.md](docs/upgrade.md) | 升级与发布 |
