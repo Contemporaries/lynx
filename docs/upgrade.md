@@ -1,8 +1,10 @@
-# 更新流程
+# 升级与发布
 
-## 版本与发布物
+当前版本：**v2.1.0**。
 
-正式版本通过 GitHub tag（如 `v2.1.0`）触发 [Release 工作流](../.github/workflows/release.yml)，产物包括：
+## Release 产物
+
+打 `v*` tag 后由 [Release 工作流](../.github/workflows/release.yml) 构建：
 
 | 文件 | 说明 |
 |---|---|
@@ -11,9 +13,9 @@
 | `lynx-client-windows-amd64.exe` | Windows 客户端 |
 | `SHA256SUMS` | 校验和 |
 
-发布页：https://github.com/Contemporaries/lynx/releases
+https://github.com/Contemporaries/lynx/releases
 
-## 发布新版本（维护者）
+## 维护者发布
 
 ```bash
 go test ./...
@@ -24,58 +26,57 @@ git push origin main
 git push origin v2.1.0
 ```
 
-推送 `v*` tag 后，GitHub Actions 自动构建并创建 Release。
-
-## Linux 一键升级（推荐）
+## Linux 升级（推荐）
 
 ```bash
-sudo ./deploy/upgrade-server.sh
+# 服务端
+sudo ./deploy/upgrade-server.sh          # latest
 sudo ./deploy/upgrade-server.sh v2.1.0
 sudo lynx-wizard --upgrade-server
 
+# 客户端
 sudo ./deploy/upgrade-client.sh
 sudo lynx-wizard --upgrade-client
 ```
 
-## 升级到 2.0+（单文件客户端配置）
+脚本会下载 Release 产物、校验 SHA256、备份旧二进制，并重启对应 systemd 单元。
 
-- 客户端不再支持 `cert_file` / `key_file` / `ca_file`
-- 使用一份 `client.json`：`subscribe_url` 和/或内联 PEM
-- 端口约定：订阅走 nginx **443** path；直连 mTLS **8443**
-
-```bash
-lynx-client -subscribe 'https://subscribe.example.com/_lynx/v1/subscribe/<token>' -config /etc/lynx/client.json
-```
-
-## 升级 Linux 服务端（手动）
+## 手动升级服务端
 
 ```bash
 sudo tar -czf ~/lynx-backup-$(date +%Y%m%d).tar.gz /etc/lynx
 sudo systemctl stop lynx-server
 sudo install -m0755 lynx-server-linux-amd64 /usr/local/bin/lynx-server
 sudo systemctl start lynx-server
+sudo systemctl status lynx-server --no-pager
+lynx-server -version
 ```
 
-## 升级 Linux 客户端
+配置对照 [configs/server.json](../configs/server.json)。Cloudflare Tunnel 仅需放行 `path: ^/_lynx/v1/connect$`；订阅走 nginx。
+
+## 手动升级客户端
 
 ```bash
-sudo ./deploy/upgrade-client.sh
+sudo systemctl stop lynx-client
+sudo install -m0755 lynx-client-linux-amd64 /usr/local/bin/lynx-client
+sudo systemctl start lynx-client
 ```
 
-## 升级 Windows 客户端
+保留 `/etc/lynx/client.json`（单文件，含内联 PEM 或 `subscribe_url`）。
 
-1. 退出旧进程
-2. 用新 `lynx-client-windows-amd64.exe` 覆盖
-3. 使用 `-subscribe` 或 `subscribe_url` 更新单文件 `client.json`
+## Windows
+
+覆盖 `lynx-client-windows-amd64.exe`，必要时用 `-subscribe` 刷新 `client.json`。
 
 ## 回滚
 
 ```bash
 sudo systemctl stop lynx-server
 sudo tar -xzf ~/lynx-backup-YYYYMMDD.tar.gz -C /
+# 恢复对应版本的 /usr/local/bin/lynx-server
 sudo systemctl start lynx-server
 ```
 
-## 证书与设备
+## 设备与证书
 
-更新程序**不会**自动轮换设备证书。吊销设备请在服务端 `clients` 中设 `"enabled": false`、删除对应条目，或轮换 `subscribe_token`，然后重启 `lynx-server`。
+升级不会自动轮换设备证书。吊销：在 `clients` 中设 `enabled: false`、删除条目，或轮换 `subscribe_token`，然后重启 `lynx-server`。

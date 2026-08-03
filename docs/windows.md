@@ -1,16 +1,18 @@
 # Windows 客户端
 
-## 单文件配置
+适用 Lynx **v2.1.0** 单文件配置。
+
+## 订阅并启动
 
 ```powershell
-# 仅订阅 URL（会写回 client.json，内含 inline PEM）
 .\lynx-client-windows-amd64.exe -subscribe "https://subscribe.example.com/_lynx/v1/subscribe/<token>" -config .\client.json
 
-# 之后日常启动
 .\lynx-client-windows-amd64.exe -config .\client.json
 ```
 
-`client.json` 示例（首次可只有 subscribe_url）：
+## client.json
+
+首次可仅含订阅地址：
 
 ```json
 {
@@ -21,10 +23,12 @@
 }
 ```
 
-拉取成功后文件内会出现 `certificate` / `key` / `certificate_authority` 字段，**不再需要** 单独的 `.crt` / `.key` 文件。
+订阅成功后，同文件会包含内联 `certificate` / `key` / `certificate_authority`。
 
-验证：
+## 验证
 
 ```powershell
 curl.exe --socks5-hostname 127.0.0.1:1080 https://ifconfig.me
 ```
+
+在浏览器或其他软件中将代理设为 `127.0.0.1:1080`（SOCKS5）或 `127.0.0.1:8080`（HTTP）。
