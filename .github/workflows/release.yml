@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create (e.g. v2.1.0); leave empty to only build artifacts"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: "1.24.x"
+
+jobs:
+  build-cli:
+    name: Build CLI (${{ matrix.goos }}-${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            artifact: lynx-server-linux-amd64
+            pkg: lynx-server
+          - goos: linux
+            goarch: arm64
+            artifact: lynx-server-linux-arm64
+            pkg: lynx-server
+          - goos: linux
+            goarch: amd64
+            artifact: lynx-client-linux-amd64
+            pkg: lynx-client
+          - goos: linux
+            goarch: arm64
+            artifact: lynx-client-linux-arm64
+            pkg: lynx-client
+          - goos: windows
+            goarch: amd64
+            artifact: lynx-client-windows-amd64.exe
+            pkg: lynx-client
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Test
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64' && matrix.pkg == 'lynx-client'
+        run: |
+          go test ./...
+          go vet ./...
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          VER="${GITHUB_REF_NAME}"
+          if [[ "$VER" != v* ]]; then VER="dev"; fi
+          go build -trimpath \
+            -ldflags="-s -w -X github.com/Contemporaries/lynx/internal/version.Version=${VER}" \
+            -o "dist/${{ matrix.artifact }}" "./cmd/${{ matrix.pkg }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-cli]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.tag != ''
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+      - name: Stage release files
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name 'lynx-*' -o -name '*.exe' \) -exec cp -v {} release/ \;
+          cd release
+          sha256sum * > SHA256SUMS
+          ls -la
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: Lynx ${{ steps.tag.outputs.name }}
+          generate_release_notes: true
+          files: release/*
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

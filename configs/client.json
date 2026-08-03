@@ -1,0 +1,8 @@
+{
+  "subscribe_url": "https://subscribe.example.com/_lynx/v1/subscribe/REPLACE_WITH_TOKEN",
+  "socks_listen": "127.0.0.1:1080",
+  "http_listen": "127.0.0.1:8080",
+  "proxy_channels": 3,
+  "ping_interval_seconds": 20,
+  "pong_timeout_misses": 3
+}
