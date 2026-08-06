@@ -2,7 +2,7 @@
 
 **English** | [中文](uninstall.zh-CN.md)
 
-Remove Lynx **v2.1.0** client-only or full server stack.
+Remove Lynx **v2.2.0** client-only or full server stack.
 
 ## Client only
 

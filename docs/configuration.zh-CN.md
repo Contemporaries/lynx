@@ -2,7 +2,7 @@
 
 [English](configuration.md) | **中文**
 
-Lynx **v2.1.0** 分步配置：端口、nginx 订阅、server/client JSON、验证。Tunnel/Access 详见 [cloudflare.zh-CN.md](cloudflare.zh-CN.md)；威胁模型与控制项见 [security.zh-CN.md](security.zh-CN.md)。
+Lynx **v2.2.0** 分步配置：端口、nginx 订阅、server/client JSON、验证。Tunnel/Access 详见 [cloudflare.zh-CN.md](cloudflare.zh-CN.md)；威胁模型与控制项见 [security.zh-CN.md](security.zh-CN.md)。
 
 ## 架构（端口）
 

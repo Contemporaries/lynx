@@ -2,7 +2,7 @@
 
 **English** | [中文](ONE_CLICK.zh-CN.md)
 
-For Lynx **v2.1.0**: local SOCKS5/HTTP; subscribe via nginx **443**; direct mTLS **8443**; WSS via Cloudflare Tunnel.
+For Lynx **v2.2.0**: local SOCKS5/HTTP; subscribe via nginx **443**; direct mTLS **8443**; WSS via Cloudflare Tunnel.
 
 Deep dives: [docs/configuration.md](docs/configuration.md) · [docs/cloudflare.md](docs/cloudflare.md) · [docs/security.md](docs/security.md).
 

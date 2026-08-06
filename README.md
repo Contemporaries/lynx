@@ -2,7 +2,7 @@
 
 **English** | [中文](README.zh-CN.md)
 
-Lynx **v2.1.0** is an encrypted TCP proxy: apps use local SOCKS5 / HTTP, and the client reaches the server over **direct mTLS** or **Cloudflare WebSocket**. The inner tunnel is TLS 1.3 with per-device mTLS.
+Lynx **v2.2.0** is an encrypted TCP proxy: apps use local SOCKS5 / HTTP, and the client reaches the server over **direct mTLS** or **Cloudflare WebSocket**. The inner tunnel is TLS 1.3 with per-device mTLS.
 
 It is **not** a system VPN: no TUN device, no default route or system DNS changes.
 

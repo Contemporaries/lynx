@@ -2,7 +2,7 @@
 
 **English** | [中文](transport.zh-CN.md)
 
-For Lynx **v2.1.0**. Two data-plane paths reach the server. Subscribe (nginx 443 path) is separate and does not replace either path.
+For Lynx **v2.2.0**. Two data-plane paths reach the server. Subscribe (nginx 443 path) is separate and does not replace either path.
 
 Both end in inner TLS 1.3 + per-device mTLS. The CDN **cannot** read proxy plaintext; it can see hostname, volume, duration, and similar metadata.
 

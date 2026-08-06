@@ -2,7 +2,7 @@
 
 **English** | [中文](configuration.zh-CN.md)
 
-Step-by-step setup for Lynx **v2.1.0**: ports, nginx subscribe, server/client JSON, and verification. For Tunnel/Access detail see [cloudflare.md](cloudflare.md). For controls and threat model see [security.md](security.md).
+Step-by-step setup for Lynx **v2.2.0**: ports, nginx subscribe, server/client JSON, and verification. For Tunnel/Access detail see [cloudflare.md](cloudflare.md). For controls and threat model see [security.md](security.md).
 
 ## Architecture (ports)
 

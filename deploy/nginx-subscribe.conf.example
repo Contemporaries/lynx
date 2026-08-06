@@ -1,4 +1,4 @@
-# Lynx v2.1.0 — subscribe reverse proxy (nginx + public cert)
+# Lynx v2.2.0 — subscribe reverse proxy (nginx + public cert)
 # Origin: http://127.0.0.1:8080/_lynx/v1/subscribe/<token>
 #
 # Ports:

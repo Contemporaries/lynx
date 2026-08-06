@@ -2,7 +2,7 @@
 
 [English](README.md) | **中文**
 
-Lynx **v2.1.0** 是一套加密 TCP 代理：应用走本机 SOCKS5 / HTTP，客户端经 **直连 mTLS** 或 **Cloudflare WebSocket** 到达服务端；内层为 TLS 1.3 + 每设备 mTLS。
+Lynx **v2.2.0** 是一套加密 TCP 代理：应用走本机 SOCKS5 / HTTP，客户端经 **直连 mTLS** 或 **Cloudflare WebSocket** 到达服务端；内层为 TLS 1.3 + 每设备 mTLS。
 
 不是系统 VPN：不创建 TUN，不改默认路由或系统 DNS。
 

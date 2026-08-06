@@ -2,7 +2,7 @@
 
 [English](ONE_CLICK.md) | **中文**
 
-面向 Lynx **v2.1.0**：本机 SOCKS5/HTTP；订阅走 nginx **443**；直连 mTLS **8443**；WSS 走 Cloudflare Tunnel。
+面向 Lynx **v2.2.0**：本机 SOCKS5/HTTP；订阅走 nginx **443**；直连 mTLS **8443**；WSS 走 Cloudflare Tunnel。
 
 深入阅读：[docs/configuration.zh-CN.md](docs/configuration.zh-CN.md) · [docs/cloudflare.zh-CN.md](docs/cloudflare.zh-CN.md) · [docs/security.zh-CN.md](docs/security.zh-CN.md)。
 
