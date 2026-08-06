@@ -11,7 +11,7 @@ Step-by-step setup for Lynx **v2.1.0**: ports, nginx subscribe, server/client JS
 | Subscribe (public) | HTTPS **443** path `/_lynx/v1/subscribe/` | nginx → `127.0.0.1:8080` |
 | Direct mTLS | TCP **8443** | Must **not** share the subscribe port |
 | Server WS + subscribe origin | `127.0.0.1:8080` | Tunnel only allows connect path |
-| Client SOCKS5 | `127.0.0.1:1080` | |
+| Client SOCKS5 | `127.0.0.1:1080` | TCP CONNECT + UDP ASSOCIATE |
 | Client HTTP proxy | `127.0.0.1:8080` | Local to the client machine |
 
 ```text
@@ -164,8 +164,8 @@ Or use the wizard-generated bundle (already contains PEM + endpoints).
 | `ws_inner_server_name` | `lynx.internal` | Inner mTLS SNI |
 | `certificate` / `key` / `certificate_authority` | from subscribe | Inline PEM |
 | `cf_access_client_id` / `cf_access_client_secret` | optional | Access service token |
-| `socks_listen` | `127.0.0.1:1080` | Empty disables |
-| `http_listen` | `127.0.0.1:8080` | |
+| `socks_listen` | `127.0.0.1:1080` | Empty disables; supports CONNECT + UDP ASSOCIATE |
+| `http_listen` | `127.0.0.1:8080` | TCP only (no UDP) |
 | `proxy_channels` | 3 (max 8) | Mux pool size |
 | `proxy_username` / `proxy_password` | — | Required if listen is non-local |
 | `ping_interval_seconds` | 20 | |

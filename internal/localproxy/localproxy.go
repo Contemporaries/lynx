@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -20,13 +21,23 @@ import (
 
 type OpenFunc func(context.Context, string) (net.Conn, error)
 
+// UDPRelay is a multiplexed UDP association used by SOCKS5 UDP ASSOCIATE.
+type UDPRelay interface {
+	WriteTo(p []byte, addr string) (int, error)
+	ReadFrom(p []byte) (n int, addr string, err error)
+	Close() error
+}
+
+type AssociateUDPFunc func(context.Context) (UDPRelay, error)
+
 type Config struct {
-	SOCKSListen string
-	HTTPListen  string
-	Username    string
-	Password    string
-	Open        OpenFunc
-	Logger      *log.Logger
+	SOCKSListen  string
+	HTTPListen   string
+	Username     string
+	Password     string
+	Open         OpenFunc
+	AssociateUDP AssociateUDPFunc // optional; if nil, ASSOCIATE returns command not supported
+	Logger       *log.Logger
 }
 
 func Serve(ctx context.Context, cfg Config) error {
@@ -96,24 +107,133 @@ func handleSOCKS(parent context.Context, conn net.Conn, cfg Config) {
 			return
 		}
 	}
-	target, err := socksReadConnect(br)
+	cmd, target, err := socksReadRequest(br)
 	if err != nil {
-		_ = writeSOCKSReply(conn, 0x07)
+		_ = writeSOCKSReply(conn, 0x07, nil)
 		return
 	}
-	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
-	remote, err := cfg.Open(ctx, target)
-	cancel()
+	switch cmd {
+	case 0x01: // CONNECT
+		ctx, cancel := context.WithTimeout(parent, 20*time.Second)
+		remote, err := cfg.Open(ctx, target)
+		cancel()
+		if err != nil {
+			_ = writeSOCKSReply(conn, 0x05, nil)
+			return
+		}
+		defer remote.Close()
+		if err := writeSOCKSReply(conn, 0x00, nil); err != nil {
+			return
+		}
+		_ = conn.SetDeadline(time.Time{})
+		proxyBidirectional(conn, br, remote)
+	case 0x03: // UDP ASSOCIATE
+		if cfg.AssociateUDP == nil {
+			_ = writeSOCKSReply(conn, 0x07, nil)
+			return
+		}
+		handleSOCKSAssociate(parent, conn, br, cfg)
+	default:
+		_ = writeSOCKSReply(conn, 0x07, nil)
+	}
+}
+
+func handleSOCKSAssociate(parent context.Context, conn net.Conn, _ *bufio.Reader, cfg Config) {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+
+	assocCtx, assocCancel := context.WithTimeout(ctx, 20*time.Second)
+	relay, err := cfg.AssociateUDP(assocCtx)
+	assocCancel()
 	if err != nil {
-		_ = writeSOCKSReply(conn, 0x05)
+		_ = writeSOCKSReply(conn, 0x05, nil)
 		return
 	}
-	defer remote.Close()
-	if err := writeSOCKSReply(conn, 0x00); err != nil {
+	defer relay.Close()
+
+	udpHost := "127.0.0.1"
+	if la, ok := conn.LocalAddr().(*net.TCPAddr); ok && la.IP != nil && !la.IP.IsUnspecified() {
+		udpHost = la.IP.String()
+	}
+	pc, err := net.ListenPacket("udp", net.JoinHostPort(udpHost, "0"))
+	if err != nil {
+		_ = writeSOCKSReply(conn, 0x01, nil)
+		return
+	}
+	defer pc.Close()
+
+	if err := writeSOCKSReply(conn, 0x00, pc.LocalAddr()); err != nil {
 		return
 	}
 	_ = conn.SetDeadline(time.Time{})
-	proxyBidirectional(conn, br, remote)
+
+	clientIP := ""
+	if ra, ok := conn.RemoteAddr().(*net.TCPAddr); ok && ra.IP != nil {
+		clientIP = ra.IP.String()
+	}
+
+	var peerMu sync.Mutex
+	var lastPeer net.Addr
+
+	go func() {
+		buf := make([]byte, 64*1024)
+		for {
+			n, raddr, err := pc.ReadFrom(buf)
+			if err != nil {
+				cancel()
+				return
+			}
+			if clientIP != "" {
+				if ua, ok := raddr.(*net.UDPAddr); ok && ua.IP != nil && ua.IP.String() != clientIP {
+					continue
+				}
+			}
+			peerMu.Lock()
+			lastPeer = raddr
+			peerMu.Unlock()
+			dst, payload, err := parseSOCKSUDP(buf[:n])
+			if err != nil {
+				continue
+			}
+			if _, err := relay.WriteTo(payload, dst); err != nil {
+				cancel()
+				return
+			}
+		}
+	}()
+
+	go func() {
+		buf := make([]byte, 64*1024)
+		for {
+			n, addr, err := relay.ReadFrom(buf)
+			if err != nil {
+				cancel()
+				return
+			}
+			pkt, err := encodeSOCKSUDP(addr, buf[:n])
+			if err != nil {
+				continue
+			}
+			peerMu.Lock()
+			peer := lastPeer
+			peerMu.Unlock()
+			if peer == nil {
+				continue
+			}
+			_ = pc.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			if _, err := pc.WriteTo(pkt, peer); err != nil {
+				cancel()
+				return
+			}
+		}
+	}()
+
+	// Keep ASSOCIATION alive until the TCP control connection drops.
+	tmp := make([]byte, 1)
+	_, _ = conn.Read(tmp)
+	cancel()
+	_ = pc.Close()
+	_ = relay.Close()
 }
 
 func socksNegotiate(br *bufio.Reader, w io.Writer, auth bool) (byte, error) {
@@ -180,55 +300,195 @@ func socksAuthenticate(br *bufio.Reader, w io.Writer, username, password string)
 	return nil
 }
 
-func socksReadConnect(br *bufio.Reader) (string, error) {
+func socksReadRequest(br *bufio.Reader) (cmd byte, target string, err error) {
 	header := make([]byte, 4)
 	if _, err := io.ReadFull(br, header); err != nil {
-		return "", err
+		return 0, "", err
 	}
-	if header[0] != 0x05 || header[1] != 0x01 || header[2] != 0x00 {
-		return "", errors.New("only SOCKS5 CONNECT is supported")
+	if header[0] != 0x05 || header[2] != 0x00 {
+		return 0, "", errors.New("invalid SOCKS5 request")
 	}
-	var host string
-	switch header[3] {
+	cmd = header[1]
+	host, port, err := socksReadAddress(br, header[3])
+	if err != nil {
+		return 0, "", err
+	}
+	if cmd == 0x01 && port <= 0 {
+		return 0, "", errors.New("invalid SOCKS5 port")
+	}
+	if port < 0 {
+		port = 0
+	}
+	return cmd, net.JoinHostPort(host, strconv.Itoa(port)), nil
+}
+
+func socksReadAddress(br *bufio.Reader, atyp byte) (host string, port int, err error) {
+	switch atyp {
 	case 0x01:
 		b := make([]byte, 4)
 		if _, err := io.ReadFull(br, b); err != nil {
-			return "", err
+			return "", 0, err
 		}
 		host = net.IP(b).String()
 	case 0x03:
 		n, err := br.ReadByte()
 		if err != nil || n == 0 {
-			return "", errors.New("invalid SOCKS5 domain")
+			return "", 0, errors.New("invalid SOCKS5 domain")
 		}
 		b := make([]byte, int(n))
 		if _, err := io.ReadFull(br, b); err != nil {
-			return "", err
+			return "", 0, err
 		}
 		host = string(b)
 	case 0x04:
 		b := make([]byte, 16)
 		if _, err := io.ReadFull(br, b); err != nil {
-			return "", err
+			return "", 0, err
 		}
 		host = net.IP(b).String()
 	default:
-		return "", errors.New("unsupported SOCKS5 address type")
+		return "", 0, errors.New("unsupported SOCKS5 address type")
 	}
 	portBytes := make([]byte, 2)
 	if _, err := io.ReadFull(br, portBytes); err != nil {
-		return "", err
+		return "", 0, err
 	}
-	port := int(portBytes[0])<<8 | int(portBytes[1])
-	if port <= 0 {
-		return "", errors.New("invalid SOCKS5 port")
-	}
-	return net.JoinHostPort(host, strconv.Itoa(port)), nil
+	port = int(portBytes[0])<<8 | int(portBytes[1])
+	return host, port, nil
 }
 
-func writeSOCKSReply(w io.Writer, code byte) error {
-	_, err := w.Write([]byte{0x05, code, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+func writeSOCKSReply(w io.Writer, code byte, bind net.Addr) error {
+	ip := net.IPv4zero
+	port := 0
+	atyp := byte(0x01)
+	if bind != nil {
+		switch a := bind.(type) {
+		case *net.UDPAddr:
+			if a.IP != nil {
+				if v4 := a.IP.To4(); v4 != nil {
+					ip = v4
+					atyp = 0x01
+				} else {
+					ip = a.IP.To16()
+					atyp = 0x04
+				}
+			}
+			port = a.Port
+		case *net.TCPAddr:
+			if a.IP != nil {
+				if v4 := a.IP.To4(); v4 != nil {
+					ip = v4
+					atyp = 0x01
+				} else {
+					ip = a.IP.To16()
+					atyp = 0x04
+				}
+			}
+			port = a.Port
+		}
+	}
+	var reply []byte
+	if atyp == 0x04 {
+		reply = make([]byte, 4+16+2)
+		reply[0], reply[1], reply[2], reply[3] = 0x05, code, 0x00, 0x04
+		copy(reply[4:20], ip)
+		binary.BigEndian.PutUint16(reply[20:22], uint16(port))
+	} else {
+		reply = make([]byte, 10)
+		reply[0], reply[1], reply[2], reply[3] = 0x05, code, 0x00, 0x01
+		copy(reply[4:8], ip.To4())
+		binary.BigEndian.PutUint16(reply[8:10], uint16(port))
+	}
+	_, err := w.Write(reply)
 	return err
+}
+
+func parseSOCKSUDP(pkt []byte) (dst string, payload []byte, err error) {
+	if len(pkt) < 4 {
+		return "", nil, errors.New("udp packet too short")
+	}
+	if pkt[0] != 0 || pkt[1] != 0 {
+		return "", nil, errors.New("invalid socks udp rsv")
+	}
+	if pkt[2] != 0 {
+		return "", nil, errors.New("socks udp fragmentation not supported")
+	}
+	atyp := pkt[3]
+	rest := pkt[4:]
+	var host string
+	var port int
+	switch atyp {
+	case 0x01:
+		if len(rest) < 6 {
+			return "", nil, errors.New("udp ipv4 truncated")
+		}
+		host = net.IP(rest[:4]).String()
+		port = int(rest[4])<<8 | int(rest[5])
+		payload = rest[6:]
+	case 0x03:
+		if len(rest) < 1 {
+			return "", nil, errors.New("udp domain truncated")
+		}
+		n := int(rest[0])
+		if n == 0 || len(rest) < 1+n+2 {
+			return "", nil, errors.New("udp domain truncated")
+		}
+		host = string(rest[1 : 1+n])
+		port = int(rest[1+n])<<8 | int(rest[1+n+1])
+		payload = rest[1+n+2:]
+	case 0x04:
+		if len(rest) < 18 {
+			return "", nil, errors.New("udp ipv6 truncated")
+		}
+		host = net.IP(rest[:16]).String()
+		port = int(rest[16])<<8 | int(rest[17])
+		payload = rest[18:]
+	default:
+		return "", nil, errors.New("unsupported socks udp atyp")
+	}
+	if port <= 0 {
+		return "", nil, errors.New("invalid socks udp port")
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port)), payload, nil
+}
+
+func encodeSOCKSUDP(addr string, payload []byte) ([]byte, error) {
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port < 0 || port > 65535 {
+		return nil, errors.New("invalid port")
+	}
+	host = strings.Trim(host, "[]")
+	if ip := net.ParseIP(host); ip != nil {
+		if v4 := ip.To4(); v4 != nil {
+			out := make([]byte, 10+len(payload))
+			out[3] = 0x01
+			copy(out[4:8], v4)
+			binary.BigEndian.PutUint16(out[8:10], uint16(port))
+			copy(out[10:], payload)
+			return out, nil
+		}
+		v6 := ip.To16()
+		out := make([]byte, 22+len(payload))
+		out[3] = 0x04
+		copy(out[4:20], v6)
+		binary.BigEndian.PutUint16(out[20:22], uint16(port))
+		copy(out[22:], payload)
+		return out, nil
+	}
+	if len(host) > 255 {
+		return nil, errors.New("domain too long")
+	}
+	out := make([]byte, 7+len(host)+len(payload))
+	out[3] = 0x03
+	out[4] = byte(len(host))
+	copy(out[5:5+len(host)], host)
+	binary.BigEndian.PutUint16(out[5+len(host):7+len(host)], uint16(port))
+	copy(out[7+len(host):], payload)
+	return out, nil
 }
 
 func handleHTTP(parent context.Context, conn net.Conn, cfg Config) {

@@ -103,6 +103,7 @@ func (p *Pool) connect(ctx context.Context) (*clientSession, error) {
 		tr:                tr,
 		maxFlows:          cfg.MaxFlows,
 		flows:             make(map[uint32]*Conn),
+		udps:              make(map[uint32]*UDPAssoc),
 		dead:              make(chan struct{}),
 		pingInterval:      p.opts.PingInterval,
 		pongTimeoutMisses: p.opts.PongTimeoutMisses,
@@ -155,8 +156,9 @@ func (p *Pool) maintain() {
 	}
 }
 
-func (p *Pool) Open(ctx context.Context, address string) (net.Conn, error) {
+func (p *Pool) pickSession() *clientSession {
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	var chosen *clientSession
 	for _, s := range p.sessions {
 		if s.isDead() || s.active.Load() >= int64(s.maxFlows) {
@@ -166,11 +168,24 @@ func (p *Pool) Open(ctx context.Context, address string) (net.Conn, error) {
 			chosen = s
 		}
 	}
-	p.mu.Unlock()
+	return chosen
+}
+
+func (p *Pool) Open(ctx context.Context, address string) (net.Conn, error) {
+	chosen := p.pickSession()
 	if chosen == nil {
 		return nil, errors.New("no healthy proxy transport is available")
 	}
 	return chosen.open(ctx, address)
+}
+
+// AssociateUDP opens a SOCKS5-style UDP association over the mux.
+func (p *Pool) AssociateUDP(ctx context.Context) (*UDPAssoc, error) {
+	chosen := p.pickSession()
+	if chosen == nil {
+		return nil, errors.New("no healthy proxy transport is available")
+	}
+	return chosen.associateUDP(ctx)
 }
 
 func (p *Pool) HealthyChannels() int {
@@ -208,6 +223,7 @@ type clientSession struct {
 	active            atomic.Int64
 	mu                sync.Mutex
 	flows             map[uint32]*Conn
+	udps              map[uint32]*UDPAssoc
 	dead              chan struct{}
 	deadOnce          sync.Once
 	pingInterval      time.Duration
@@ -217,14 +233,19 @@ type clientSession struct {
 	missedPongs       int
 }
 
-func (s *clientSession) open(ctx context.Context, address string) (*Conn, error) {
-	if s.isDead() {
-		return nil, io.ErrClosedPipe
-	}
+func (s *clientSession) allocID() (uint32, error) {
 	id := s.nextID.Add(1)
 	if id == 0 {
 		id = s.nextID.Add(1)
 	}
+	return id, nil
+}
+
+func (s *clientSession) open(ctx context.Context, address string) (*Conn, error) {
+	if s.isDead() {
+		return nil, io.ErrClosedPipe
+	}
+	id, _ := s.allocID()
 	c := &Conn{
 		session:    s,
 		id:         id,
@@ -234,7 +255,7 @@ func (s *clientSession) open(ctx context.Context, address string) (*Conn, error)
 		remoteDone: make(chan struct{}),
 	}
 	s.mu.Lock()
-	if len(s.flows) >= s.maxFlows {
+	if len(s.flows)+len(s.udps) >= s.maxFlows {
 		s.mu.Unlock()
 		return nil, errors.New("proxy session flow limit reached")
 	}
@@ -243,19 +264,64 @@ func (s *clientSession) open(ctx context.Context, address string) (*Conn, error)
 	s.mu.Unlock()
 	openPayload, _ := json.Marshal(proto.ProxyOpen{FlowID: id, Network: "tcp", Address: address})
 	if err := s.tr.WriteControl(proto.FrameProxyOpen, openPayload); err != nil {
-		s.remove(id, err)
+		s.removeTCP(id, err)
 		return nil, err
 	}
 	select {
 	case result := <-c.opened:
 		if !result.OK {
-			s.remove(id, errors.New(result.Error))
+			s.removeTCP(id, errors.New(result.Error))
 			return nil, errors.New(result.Error)
 		}
 		return c, nil
 	case <-ctx.Done():
 		_ = s.tr.WriteControl(proto.FrameProxyClose, proto.EncodeFlowID(id))
-		s.remove(id, ctx.Err())
+		s.removeTCP(id, ctx.Err())
+		return nil, ctx.Err()
+	case <-s.dead:
+		return nil, io.ErrClosedPipe
+	}
+}
+
+func (s *clientSession) associateUDP(ctx context.Context) (*UDPAssoc, error) {
+	if s.isDead() {
+		return nil, io.ErrClosedPipe
+	}
+	id, _ := s.allocID()
+	a := &UDPAssoc{
+		session: s,
+		id:      id,
+		opened:  make(chan proto.ProxyResult, 1),
+		recv:    make(chan udpPacket, 64),
+		done:    make(chan struct{}),
+	}
+	s.mu.Lock()
+	if len(s.flows)+len(s.udps) >= s.maxFlows {
+		s.mu.Unlock()
+		return nil, errors.New("proxy session flow limit reached")
+	}
+	s.udps[id] = a
+	s.active.Add(1)
+	s.mu.Unlock()
+	openPayload, _ := json.Marshal(proto.ProxyOpen{FlowID: id, Network: "udp"})
+	if err := s.tr.WriteControl(proto.FrameProxyOpen, openPayload); err != nil {
+		s.removeUDP(id, err)
+		return nil, err
+	}
+	select {
+	case result := <-a.opened:
+		if !result.OK {
+			err := errors.New(result.Error)
+			if result.Error == "" {
+				err = errors.New("udp associate rejected")
+			}
+			s.removeUDP(id, err)
+			return nil, err
+		}
+		return a, nil
+	case <-ctx.Done():
+		_ = s.tr.WriteControl(proto.FrameProxyClose, proto.EncodeFlowID(id))
+		s.removeUDP(id, ctx.Err())
 		return nil, ctx.Err()
 	case <-s.dead:
 		return nil, io.ErrClosedPipe
@@ -278,9 +344,14 @@ func (s *clientSession) readLoop() {
 				terminal = err
 				return
 			}
-			if c := s.get(result.FlowID); c != nil {
+			if c := s.getTCP(result.FlowID); c != nil {
 				select {
 				case c.opened <- result:
+				default:
+				}
+			} else if a := s.getUDP(result.FlowID); a != nil {
+				select {
+				case a.opened <- result:
 				default:
 				}
 			}
@@ -290,14 +361,29 @@ func (s *clientSession) readLoop() {
 				terminal = err
 				return
 			}
-			if c := s.get(id); c != nil {
+			if c := s.getTCP(id); c != nil {
 				copyData := append([]byte(nil), data...)
 				select {
 				case c.recv <- copyData:
 				case <-c.done:
 				default:
-					// Slow consumer: drop only this flow so the session stays healthy.
-					s.remove(id, errors.New("proxy flow receive buffer full"))
+					s.removeTCP(id, errors.New("proxy flow receive buffer full"))
+					_ = s.tr.WriteControl(proto.FrameProxyClose, proto.EncodeFlowID(id))
+				}
+			}
+		case proto.FrameProxyDatagram:
+			id, addr, data, err := proto.DecodeDatagram(payload)
+			if err != nil {
+				terminal = err
+				return
+			}
+			if a := s.getUDP(id); a != nil {
+				pkt := udpPacket{addr: addr, data: append([]byte(nil), data...)}
+				select {
+				case a.recv <- pkt:
+				case <-a.done:
+				default:
+					s.removeUDP(id, errors.New("udp association receive buffer full"))
 					_ = s.tr.WriteControl(proto.FrameProxyClose, proto.EncodeFlowID(id))
 				}
 			}
@@ -307,7 +393,7 @@ func (s *clientSession) readLoop() {
 				terminal = err
 				return
 			}
-			if c := s.get(id); c != nil {
+			if c := s.getTCP(id); c != nil {
 				c.remoteEOF()
 			}
 		case proto.FrameProxyClose:
@@ -316,7 +402,11 @@ func (s *clientSession) readLoop() {
 				terminal = err
 				return
 			}
-			s.remove(id, io.EOF)
+			if s.getTCP(id) != nil {
+				s.removeTCP(id, io.EOF)
+			} else {
+				s.removeUDP(id, io.EOF)
+			}
 		case proto.FramePing:
 			if err := s.tr.WriteControl(proto.FramePong, payload); err != nil {
 				terminal = err
@@ -368,13 +458,19 @@ func (s *clientSession) pingLoop() {
 	}
 }
 
-func (s *clientSession) get(id uint32) *Conn {
+func (s *clientSession) getTCP(id uint32) *Conn {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.flows[id]
 }
 
-func (s *clientSession) remove(id uint32, err error) {
+func (s *clientSession) getUDP(id uint32) *UDPAssoc {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.udps[id]
+}
+
+func (s *clientSession) removeTCP(id uint32, err error) {
 	s.mu.Lock()
 	c := s.flows[id]
 	if c != nil {
@@ -387,17 +483,35 @@ func (s *clientSession) remove(id uint32, err error) {
 	}
 }
 
+func (s *clientSession) removeUDP(id uint32, err error) {
+	s.mu.Lock()
+	a := s.udps[id]
+	if a != nil {
+		delete(s.udps, id)
+		s.active.Add(-1)
+	}
+	s.mu.Unlock()
+	if a != nil {
+		a.finish(err)
+	}
+}
+
 func (s *clientSession) failAll(err error) {
 	s.deadOnce.Do(func() {
 		close(s.dead)
 		_ = s.tr.Close()
 		s.mu.Lock()
 		flows := s.flows
+		udps := s.udps
 		s.flows = make(map[uint32]*Conn)
+		s.udps = make(map[uint32]*UDPAssoc)
 		s.active.Store(0)
 		s.mu.Unlock()
 		for _, c := range flows {
 			c.finish(err)
+		}
+		for _, a := range udps {
+			a.finish(err)
 		}
 	})
 }
@@ -478,7 +592,7 @@ func (c *Conn) Write(p []byte) (int, error) {
 			n = chunkSize
 		}
 		if err := c.session.tr.WriteControl(proto.FrameProxyData, proto.EncodeFlowPayload(c.id, p[:n])); err != nil {
-			c.session.remove(c.id, err)
+			c.session.removeTCP(c.id, err)
 			return written, err
 		}
 		written += n
@@ -506,7 +620,7 @@ func (c *Conn) Close() error {
 		return nil
 	}
 	_ = c.session.tr.WriteControl(proto.FrameProxyClose, proto.EncodeFlowID(c.id))
-	c.session.remove(c.id, io.EOF)
+	c.session.removeTCP(c.id, io.EOF)
 	return nil
 }
 
@@ -540,6 +654,88 @@ func (c *Conn) RemoteAddr() net.Addr             { return proxyAddr("lynx-remote
 func (c *Conn) SetDeadline(time.Time) error      { return nil }
 func (c *Conn) SetReadDeadline(time.Time) error  { return nil }
 func (c *Conn) SetWriteDeadline(time.Time) error { return nil }
+
+type udpPacket struct {
+	addr string
+	data []byte
+}
+
+// UDPAssoc is a multiplexed UDP association (SOCKS5 UDP ASSOCIATE).
+type UDPAssoc struct {
+	session *clientSession
+	id      uint32
+	opened  chan proto.ProxyResult
+	recv    chan udpPacket
+	done    chan struct{}
+
+	writeMu sync.Mutex
+	closed  bool
+
+	stateMu  sync.Mutex
+	err      error
+	doneOnce sync.Once
+}
+
+func (a *UDPAssoc) WriteTo(p []byte, addr string) (int, error) {
+	a.writeMu.Lock()
+	defer a.writeMu.Unlock()
+	if a.closed {
+		return 0, io.ErrClosedPipe
+	}
+	payload, err := proto.EncodeDatagram(a.id, addr, p)
+	if err != nil {
+		return 0, err
+	}
+	if err := a.session.tr.WriteControl(proto.FrameProxyDatagram, payload); err != nil {
+		a.session.removeUDP(a.id, err)
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (a *UDPAssoc) ReadFrom(p []byte) (n int, addr string, err error) {
+	select {
+	case pkt := <-a.recv:
+		n = copy(p, pkt.data)
+		return n, pkt.addr, nil
+	case <-a.done:
+		return 0, "", a.terminalError()
+	}
+}
+
+func (a *UDPAssoc) Close() error {
+	a.writeMu.Lock()
+	already := a.closed
+	a.closed = true
+	a.writeMu.Unlock()
+	if already {
+		return nil
+	}
+	_ = a.session.tr.WriteControl(proto.FrameProxyClose, proto.EncodeFlowID(a.id))
+	a.session.removeUDP(a.id, io.EOF)
+	return nil
+}
+
+func (a *UDPAssoc) finish(err error) {
+	a.doneOnce.Do(func() {
+		if err == nil {
+			err = io.EOF
+		}
+		a.stateMu.Lock()
+		a.err = err
+		a.stateMu.Unlock()
+		close(a.done)
+	})
+}
+
+func (a *UDPAssoc) terminalError() error {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	if a.err == nil {
+		return io.EOF
+	}
+	return a.err
+}
 
 type proxyAddr string
 

@@ -28,7 +28,7 @@ Lynx **v2.1.0** 是一套加密 TCP 代理：应用走本机 SOCKS5 / HTTP，客
 - 订阅：`https://subscribe.example.com/_lynx/v1/subscribe/<token>`（nginx **443** path）
 - 直连：`direct_listen` 默认 **:8443**（mTLS）
 - 数据面：Cloudflare WSS + 内层端到端 TLS（CDN 看不到代理明文）
-- 本地 SOCKS5（TCP CONNECT）与 HTTP / HTTP CONNECT
+- 本地 SOCKS5（TCP CONNECT + UDP ASSOCIATE）与 HTTP / HTTP CONNECT
 - 多路复用连接池；默认禁止代理到私有网段
 - 非本机监听时强制本地代理认证
 - Linux / Windows CLI；systemd 一键部署
@@ -36,7 +36,7 @@ Lynx **v2.1.0** 是一套加密 TCP 代理：应用走本机 SOCKS5 / HTTP，客
 ## 非目标
 
 - 系统级 VPN / 全局路由
-- UDP / QUIC / SOCKS5 UDP ASSOCIATE
+- 以 QUIC 作为客户端↔服务端传输（Cloudflare Tunnel 到源仍可能用 QUIC）
 - 尚未经过独立安全审计
 
 ## 端口约定

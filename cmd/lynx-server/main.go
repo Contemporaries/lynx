@@ -198,6 +198,7 @@ func (s *server) handleSession(parent context.Context, tr transport.Session) {
 	err = proxymux.Serve(parent, tr, proxymux.ServerOptions{
 		MaxFlows:          s.cfg.MaxProxyFlowsPerSession,
 		MaxNewFlowsPerSec: s.cfg.Security.MaxNewFlowsPerSecond,
+		IdleTimeout:       s.cfg.Security.FlowIdleTimeout(),
 		OnFlowOpen: func() bool {
 			return s.acquireFlow(fp)
 		},
@@ -206,6 +207,9 @@ func (s *server) handleSession(parent context.Context, tr transport.Session) {
 		},
 		Dial: func(ctx context.Context, address string) (net.Conn, error) {
 			return dialProxyTarget(ctx, address, s.cfg.AllowPrivateNetworks, time.Duration(s.cfg.ProxyDialTimeoutSeconds)*time.Second)
+		},
+		CheckUDPDestination: func(ctx context.Context, address string) error {
+			return checkUDPDestination(ctx, address, s.cfg.AllowPrivateNetworks, time.Duration(s.cfg.ProxyDialTimeoutSeconds)*time.Second)
 		},
 	})
 	if err != nil && !errors.Is(err, context.Canceled) {
@@ -282,42 +286,13 @@ func (s *server) releaseFlow(fp string) {
 }
 
 func dialProxyTarget(ctx context.Context, address string, allowPrivate bool, timeout time.Duration) (net.Conn, error) {
-	host, port, err := net.SplitHostPort(address)
+	ips, port, err := resolveProxyIPs(ctx, address, allowPrivate, timeout)
 	if err != nil {
-		return nil, fmt.Errorf("invalid target address: %w", err)
-	}
-	portNumber, err := strconv.Atoi(port)
-	if err != nil || portNumber < 1 || portNumber > 65535 {
-		return nil, fmt.Errorf("invalid target port")
-	}
-	host = strings.TrimSpace(strings.Trim(host, "[]"))
-	if host == "" {
-		return nil, fmt.Errorf("empty target host")
-	}
-	lookupCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	var ips []net.IP
-	if parsed := net.ParseIP(host); parsed != nil {
-		ips = []net.IP{parsed}
-	} else {
-		resolved, err := net.DefaultResolver.LookupIPAddr(lookupCtx, host)
-		if err != nil {
-			return nil, fmt.Errorf("resolve target: %w", err)
-		}
-		for _, item := range resolved {
-			ips = append(ips, item.IP)
-		}
-	}
-	if len(ips) == 0 {
-		return nil, fmt.Errorf("target has no IP address")
+		return nil, err
 	}
 	dialer := &net.Dialer{Timeout: timeout, KeepAlive: 30 * time.Second}
 	var lastErr error
 	for _, ip := range ips {
-		if !allowPrivate && forbiddenProxyIP(ip) {
-			lastErr = fmt.Errorf("target address is not allowed")
-			continue
-		}
 		conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip.String(), port))
 		if err == nil {
 			return conn, nil
@@ -328,6 +303,59 @@ func dialProxyTarget(ctx context.Context, address string, allowPrivate bool, tim
 		lastErr = fmt.Errorf("no allowed target address")
 	}
 	return nil, lastErr
+}
+
+func checkUDPDestination(ctx context.Context, address string, allowPrivate bool, timeout time.Duration) error {
+	_, _, err := resolveProxyIPs(ctx, address, allowPrivate, timeout)
+	return err
+}
+
+func resolveProxyIPs(ctx context.Context, address string, allowPrivate bool, timeout time.Duration) ([]net.IP, string, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, "", fmt.Errorf("invalid target address: %w", err)
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return nil, "", fmt.Errorf("invalid target port")
+	}
+	host = strings.TrimSpace(strings.Trim(host, "[]"))
+	if host == "" {
+		return nil, "", fmt.Errorf("empty target host")
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var ips []net.IP
+	if parsed := net.ParseIP(host); parsed != nil {
+		ips = []net.IP{parsed}
+	} else {
+		resolved, err := net.DefaultResolver.LookupIPAddr(lookupCtx, host)
+		if err != nil {
+			return nil, "", fmt.Errorf("resolve target: %w", err)
+		}
+		for _, item := range resolved {
+			ips = append(ips, item.IP)
+		}
+	}
+	if len(ips) == 0 {
+		return nil, "", fmt.Errorf("target has no IP address")
+	}
+	var allowed []net.IP
+	var lastErr error
+	for _, ip := range ips {
+		if !allowPrivate && forbiddenProxyIP(ip) {
+			lastErr = fmt.Errorf("target address is not allowed")
+			continue
+		}
+		allowed = append(allowed, ip)
+	}
+	if len(allowed) == 0 {
+		if lastErr == nil {
+			lastErr = fmt.Errorf("no allowed target address")
+		}
+		return nil, "", lastErr
+	}
+	return allowed, port, nil
 }
 
 func forbiddenProxyIP(ip net.IP) bool {

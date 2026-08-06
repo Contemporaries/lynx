@@ -18,12 +18,13 @@ const (
 	FrameConfig      byte = 0x02
 	FramePing        byte = 0x20
 	FramePong        byte = 0x21
-	FrameProxyOpen   byte = 0x30
-	FrameProxyResult byte = 0x31
-	FrameProxyData   byte = 0x32
-	FrameProxyEOF    byte = 0x33
-	FrameProxyClose  byte = 0x34
-	FrameError       byte = 0x7f
+	FrameProxyOpen     byte = 0x30
+	FrameProxyResult   byte = 0x31
+	FrameProxyData     byte = 0x32
+	FrameProxyEOF      byte = 0x33
+	FrameProxyClose    byte = 0x34
+	FrameProxyDatagram byte = 0x35
+	FrameError         byte = 0x7f
 )
 
 const MaxFrame = 1 << 20
@@ -123,6 +124,37 @@ func DecodeFlowID(payload []byte) (uint32, error) {
 		return 0, fmt.Errorf("invalid flow id payload length %d", len(payload))
 	}
 	return binary.BigEndian.Uint32(payload), nil
+}
+
+// EncodeDatagram encodes flow_id(4) + addr_len(2 BE) + addr + data.
+func EncodeDatagram(flowID uint32, addr string, data []byte) ([]byte, error) {
+	if len(addr) > 65535 {
+		return nil, fmt.Errorf("datagram address too long")
+	}
+	total := 4 + 2 + len(addr) + len(data)
+	if total > MaxFrame {
+		return nil, fmt.Errorf("datagram frame too large: %d", total)
+	}
+	out := make([]byte, total)
+	binary.BigEndian.PutUint32(out[:4], flowID)
+	binary.BigEndian.PutUint16(out[4:6], uint16(len(addr)))
+	copy(out[6:6+len(addr)], addr)
+	copy(out[6+len(addr):], data)
+	return out, nil
+}
+
+func DecodeDatagram(payload []byte) (flowID uint32, addr string, data []byte, err error) {
+	if len(payload) < 6 {
+		return 0, "", nil, fmt.Errorf("datagram payload is too short")
+	}
+	flowID = binary.BigEndian.Uint32(payload[:4])
+	addrLen := int(binary.BigEndian.Uint16(payload[4:6]))
+	if len(payload) < 6+addrLen {
+		return 0, "", nil, fmt.Errorf("datagram address truncated")
+	}
+	addr = string(payload[6 : 6+addrLen])
+	data = payload[6+addrLen:]
+	return flowID, addr, data, nil
 }
 
 func writeFull(w io.Writer, b []byte) error {

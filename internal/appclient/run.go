@@ -56,12 +56,13 @@ func RunConfig(ctx context.Context, cfg *config.Client, logger *log.Logger) erro
 	defer pool.Close()
 	logger.Printf("proxy transport ready: %d/%d encrypted channels", pool.HealthyChannels(), cfg.ProxyChannels)
 	return localproxy.Serve(ctx, localproxy.Config{
-		SOCKSListen: cfg.SOCKSListen,
-		HTTPListen:  cfg.HTTPListen,
-		Username:    cfg.ProxyUsername,
-		Password:    cfg.ProxyPassword,
-		Open:        pool.Open,
-		Logger:      logger,
+		SOCKSListen:  cfg.SOCKSListen,
+		HTTPListen:   cfg.HTTPListen,
+		Username:     cfg.ProxyUsername,
+		Password:     cfg.ProxyPassword,
+		Open:         pool.Open,
+		AssociateUDP: func(c context.Context) (localproxy.UDPRelay, error) { return pool.AssociateUDP(c) },
+		Logger:       logger,
 	})
 }
 

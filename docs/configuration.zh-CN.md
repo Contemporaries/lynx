@@ -11,7 +11,7 @@ Lynx **v2.1.0** 分步配置：端口、nginx 订阅、server/client JSON、验�
 | 订阅（公网） | HTTPS **443** path `/_lynx/v1/subscribe/` | nginx → `127.0.0.1:8080` |
 | 直连 mTLS | TCP **8443** | **不可**与订阅共用端口 |
 | 服务端 WS + 订阅 origin | `127.0.0.1:8080` | Tunnel 仅放行 connect |
-| 客户端 SOCKS5 | `127.0.0.1:1080` | |
+| 客户端 SOCKS5 | `127.0.0.1:1080` | TCP CONNECT + UDP ASSOCIATE |
 | 客户端 HTTP 代理 | `127.0.0.1:8080` | 客户端本机 |
 
 ```text
@@ -149,8 +149,8 @@ DNS、Access 等：[cloudflare.zh-CN.md](cloudflare.zh-CN.md)。
 | `ws_inner_server_name` | `lynx.internal` | 内层 mTLS SNI |
 | `certificate` / `key` / `certificate_authority` | 订阅写入 | 内联 PEM |
 | `cf_access_client_id` / `cf_access_client_secret` | 可选 | Access Service Token |
-| `socks_listen` | `127.0.0.1:1080` | 空则关闭 |
-| `http_listen` | `127.0.0.1:8080` | |
+| `socks_listen` | `127.0.0.1:1080` | 空则关闭；支持 CONNECT + UDP ASSOCIATE |
+| `http_listen` | `127.0.0.1:8080` | 仅 TCP（无 UDP） |
 | `proxy_channels` | 3（≤8） | 连接池 |
 | `proxy_username` / `proxy_password` | — | 非本机监听时必填 |
 | `ping_interval_seconds` | 20 | |

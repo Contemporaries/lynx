@@ -35,3 +35,23 @@ func TestFlowPayloadRoundTrip(t *testing.T) {
 		t.Fatalf("id=%d data=%q", id, data)
 	}
 }
+
+func TestDatagramRoundTrip(t *testing.T) {
+	payload, err := EncodeDatagram(7, "1.2.3.4:53", []byte("dns"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, addr, data, err := DecodeDatagram(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != 7 || addr != "1.2.3.4:53" || string(data) != "dns" {
+		t.Fatalf("id=%d addr=%q data=%q", id, addr, data)
+	}
+}
+
+func TestDecodeDatagramTooShort(t *testing.T) {
+	if _, _, _, err := DecodeDatagram([]byte{1, 2, 3}); err == nil {
+		t.Fatal("expected error")
+	}
+}

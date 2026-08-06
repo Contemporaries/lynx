@@ -28,7 +28,7 @@ Direct mTLS :8443   Cloudflare WSS
 - Subscribe: `https://subscribe.example.com/_lynx/v1/subscribe/<token>` (nginx **443** path)
 - Direct: `direct_listen` default **:8443** (mTLS)
 - Data plane: Cloudflare WSS + end-to-end inner TLS (CDN cannot read proxy plaintext)
-- Local SOCKS5 (TCP CONNECT) and HTTP / HTTP CONNECT
+- Local SOCKS5 (TCP CONNECT + UDP ASSOCIATE) and HTTP / HTTP CONNECT
 - Multiplexed connection pool; private destinations blocked by default
 - Non-loopback local listen requires proxy authentication
 - Linux / Windows CLI; systemd one-click deploy
@@ -36,7 +36,7 @@ Direct mTLS :8443   Cloudflare WSS
 ## Non-goals
 
 - System VPN / global routing
-- UDP / QUIC / SOCKS5 UDP ASSOCIATE
+- QUIC as client↔server transport (Cloudflare Tunnel may still use QUIC to the origin)
 - Independent security audit (not done yet)
 
 ## Ports

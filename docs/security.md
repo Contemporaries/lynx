@@ -6,9 +6,9 @@ Threat model, trust boundaries, and controls for Lynx **v2.1.0**.
 
 ## What Lynx is (and is not)
 
-- Encrypted **TCP** proxy: apps use local SOCKS5 / HTTP CONNECT.
+- Encrypted **TCP** proxy with **SOCKS5 UDP ASSOCIATE** for datagrams: apps use local SOCKS5 / HTTP CONNECT.
 - **Not** a system VPN: no TUN, no default-route or system-DNS hijack.
-- No UDP / QUIC / SOCKS UDP ASSOCIATE.
+- No QUIC client↔server transport (WSS/direct remain TCP-based).
 - Not independently audited.
 
 ## Trust boundaries
@@ -25,7 +25,7 @@ Threat model, trust boundaries, and controls for Lynx **v2.1.0**.
 | App ↔ client | Localhost by default; bind off-loopback **requires** proxy username/password |
 | Client ↔ server (direct) | TLS 1.3 + mutual client cert; ALPN |
 | Client ↔ server (WSS) | Outer HTTPS/WSS (optional CF Access) + **inner** TLS 1.3 + client cert |
-| Server ↔ target | Plain TCP as requested by the client (subject to private-net policy) |
+| Server ↔ target | Plain TCP or UDP as requested (subject to private-net policy) |
 
 ## Device authorization (mTLS)
 
@@ -72,7 +72,15 @@ Default `allow_private_networks: false` blocks proxying to:
 - Loopback, unspecified, multicast, link-local
 - RFC1918 private ranges
 
-Denied dials fail with an error like `target address is not allowed`. Set `true` only if you intentionally need LAN/VPN targets through the server.
+Denied dials (TCP) or UDP destinations fail with an error like `target address is not allowed`. Set `true` only if you intentionally need LAN/VPN targets through the server.
+
+## SOCKS5 UDP ASSOCIATE
+
+- Enabled automatically when the SOCKS listener is up.
+- Datagrams are relayed over the same encrypted mux as TCP (direct or WSS).
+- SOCKS UDP fragmentation (`FRAG != 0`) is rejected.
+- HTTP proxy has no UDP mode.
+- Association ends when the TCP control connection closes; idle associations also time out (`flow_idle_timeout_seconds`).
 
 ## Rate and session limits
 

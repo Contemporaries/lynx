@@ -6,9 +6,9 @@ Lynx **v2.1.0** 的威胁模型、信任边界与控制项。
 
 ## 是什么 / 不是什么
 
-- 加密 **TCP** 代理：应用走本机 SOCKS5 / HTTP CONNECT
+- 加密 **TCP** 代理，并支持 **SOCKS5 UDP ASSOCIATE** 转发 datagram：应用走本机 SOCKS5 / HTTP CONNECT
 - **不是**系统 VPN：无 TUN、不改默认路由或系统 DNS
-- 无 UDP / QUIC / SOCKS UDP ASSOCIATE
+- 不以 QUIC 作为客户端↔服务端传输（WSS/直连仍基于 TCP）
 - 尚未独立安全审计
 
 ## 信任边界
@@ -24,7 +24,7 @@ Lynx **v2.1.0** 的威胁模型、信任边界与控制项。
 | 应用 ↔ 客户端 | 默认本机；非 loopback 监听**必须**代理用户名/密码 |
 | 客户端 ↔ 服务端（直连） | TLS 1.3 + 双向客户端证书；ALPN |
 | 客户端 ↔ 服务端（WSS） | 外层 HTTPS/WSS（可选 CF Access）+ **内层** TLS 1.3 + 客户端证书 |
-| 服务端 ↔ 目标 | 按客户端请求的明文 TCP（受私网策略约束） |
+| 服务端 ↔ 目标 | 按请求转发明文 TCP 或 UDP（受私网策略约束） |
 
 ## 设备授权（mTLS）
 
@@ -63,7 +63,15 @@ https://subscribe.example.com/_lynx/v1/subscribe/<token>
 
 ## 私网保护
 
-默认 `allow_private_networks: false`，禁止代理到 loopback、未指定、组播、链路本地、**RFC1918** 等。失败信息类似 `target address is not allowed`。仅在确实需要经服务端访问内网时设为 `true`。
+默认 `allow_private_networks: false`，禁止代理到 loopback、未指定、组播、链路本地、**RFC1918** 等。TCP dial 或 UDP 目的地址被拒时类似 `target address is not allowed`。仅在确实需要经服务端访问内网时设为 `true`。
+
+## SOCKS5 UDP ASSOCIATE
+
+- SOCKS 监听开启时自动可用。
+- Datagram 与 TCP 共用同一加密 mux（直连或 WSS）。
+- 不支持 SOCKS UDP 分片（`FRAG != 0` 丢弃）。
+- HTTP 代理无 UDP 模式。
+- TCP 控制连接断开即结束关联；空闲关联也会超时（`flow_idle_timeout_seconds`）。
 
 ## 速率与会话限制
 
