@@ -1,0 +1,30 @@
+[Unit]
+Description=Lynx encrypted TCP proxy server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/lynx-server -config /etc/lynx/server.json
+Restart=always
+RestartSec=3
+User=lynx
+Group=lynx
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadOnlyPaths=/etc/lynx
+ReadWritePaths=/var/lib/lynx
+
+[Install]
+WantedBy=multi-user.target
