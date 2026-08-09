@@ -2,7 +2,7 @@
 
 [English](transport.md) | **中文**
 
-适用 Lynx **v2.2.0**。数据面有两种到达服务端的方式；订阅（nginx 443 path）与二者独立。
+适用 Lynx **v2.2.2**。数据面有两种到达服务端的方式；订阅（nginx 443 path）与二者独立。
 
 两端最终都是内层 TLS 1.3 + 每设备 mTLS。CDN **看不到**代理明文，但看得到域名、体积、时长等元数据。
 
@@ -31,7 +31,7 @@
 |---|---|
 | `"direct"` | 只用直连 |
 | `"wss"` | 只用 WSS |
-| `"auto"`（默认） | 先试 WSS（约 20s），失败再直连（约 5s）。WSS 成功会把 `mode=wss` 写入 `client.json` |
+| `"auto"`（默认） | 先试 WSS（约 20s），失败再直连（约 5s）。跑在直连时约每 15s 探测 WSS，恢复后切回。**不会**改写 `client.json`。 |
 
 一键安装且启用直连时，客户端包通常以 `"mode": "auto"` 起步。
 
@@ -39,16 +39,21 @@
 
 - 优先走 Cloudflare / 严格防火墙 → 保持 `auto` 或设为 `wss`
 - 8443 稳定且要最低延迟 → 设为 `direct`
-- 先探测再固定 WSS → `auto`（首次 WSS 成功后锁定为 `wss`）
+- 要 WSS 优先并自动跌落/恢复 → `auto`（仅运行时）
 
 Tunnel 与 Access：[cloudflare.zh-CN.md](cloudflare.zh-CN.md)。安全含义：[security.zh-CN.md](security.zh-CN.md)。
 
 ## 如何判断当前走的哪条路
 
-1. **看配置**：`mode` 为 `direct` / `wss` 时路径已固定。auto 成功走 WSS 后，文件里通常已是 `"mode": "wss"`。
-2. **看日志**：  
-   `auto: WSS ok, switched mode to wss…` → 已用 WSS 并持久化。  
-   `Cloudflare WSS unavailable, falling back to direct TLS` → 该次 dial 走直连。
+1. **看配置**：`mode` 为 `direct` / `wss` 时路径已固定。`auto` 时文件里仍是 `"mode": "auto"`，实际链路只在运行时切换。
+2. **看日志**（关注 path / via）：
+
+```text
+transport: path=wss kind=cloudflare-wss via=wss://cdn.example.com/_lynx/v1/connect inner_sni=lynx.internal
+auto: path changed wss → direct (WSS connection lost: …) via=direct.example.com:8443
+transport: path=direct kind=direct-tls via=direct.example.com:8443 sni=direct.example.com
+```
+
 3. **看出站连接**：
 
 ```bash

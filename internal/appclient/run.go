@@ -18,6 +18,8 @@ import (
 	"github.com/Contemporaries/lynx/internal/transport"
 )
 
+const autoProbeInterval = 15 * time.Second
+
 // Run loads cfgPath and serves local SOCKS5/HTTP until ctx is cancelled.
 func Run(ctx context.Context, cfgPath string, logger *log.Logger) error {
 	cfg, err := config.LoadClient(cfgPath)
@@ -28,8 +30,8 @@ func Run(ctx context.Context, cfgPath string, logger *log.Logger) error {
 }
 
 // RunConfig starts the proxy client with an already-loaded config.
-// If configPath is non-empty and mode is auto, a successful WSS dial persists mode=wss.
-func RunConfig(ctx context.Context, cfg *config.Client, logger *log.Logger, configPath string) error {
+// configPath is accepted for API compatibility; auto mode never rewrites client.json.
+func RunConfig(ctx context.Context, cfg *config.Client, logger *log.Logger, _ string) error {
 	if logger == nil {
 		logger = log.Default()
 	}
@@ -44,20 +46,20 @@ func RunConfig(ctx context.Context, cfg *config.Client, logger *log.Logger, conf
 	if err != nil {
 		return err
 	}
-	var persistMu sync.Mutex
-	dial := func(dctx context.Context) (transport.Session, error) {
-		return dialTransport(dctx, cfg, cert, roots, logger, configPath, &persistMu)
-	}
+	dialer := newPathDialer(cfg, cert, roots, logger)
 	pool, err := proxymux.NewPoolWithOptions(ctx, proxymux.PoolOptions{
 		Channels:          cfg.ProxyChannels,
 		PingInterval:      time.Duration(cfg.PingIntervalSeconds) * time.Second,
 		PongTimeoutMisses: cfg.PongTimeoutMisses,
-	}, dial)
+	}, dialer.Dial)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	logger.Printf("proxy transport ready: %d/%d encrypted channels", pool.HealthyChannels(), cfg.ProxyChannels)
+	if strings.ToLower(cfg.Mode) == "auto" || cfg.Mode == "" {
+		go dialer.StartProbe(ctx, pool)
+	}
+	logger.Printf("proxy transport ready: %d/%d encrypted channels path=%s", pool.HealthyChannels(), cfg.ProxyChannels, dialer.Current())
 	return localproxy.Serve(ctx, localproxy.Config{
 		SOCKSListen:  cfg.SOCKSListen,
 		HTTPListen:   cfg.HTTPListen,
@@ -69,79 +71,161 @@ func RunConfig(ctx context.Context, cfg *config.Client, logger *log.Logger, conf
 	})
 }
 
-func dialTransport(ctx context.Context, cfg *config.Client, cert tls.Certificate, roots *x509.CertPool, logger *log.Logger, configPath string, persistMu *sync.Mutex) (transport.Session, error) {
-	if logger == nil {
-		logger = log.Default()
+type pathDialer struct {
+	cfg    *config.Client
+	cert   tls.Certificate
+	roots  *x509.CertPool
+	logger *log.Logger
+
+	mu      sync.Mutex
+	current string // "" | "wss" | "direct"
+}
+
+func newPathDialer(cfg *config.Client, cert tls.Certificate, roots *x509.CertPool, logger *log.Logger) *pathDialer {
+	return &pathDialer{cfg: cfg, cert: cert, roots: roots, logger: logger}
+}
+
+func (d *pathDialer) Current() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.current == "" {
+		return "unknown"
 	}
-	mode := strings.ToLower(cfg.Mode)
+	return d.current
+}
+
+func (d *pathDialer) Dial(ctx context.Context) (transport.Session, error) {
+	mode := strings.ToLower(d.cfg.Mode)
 	if mode != "auto" && mode != "direct" && mode != "wss" {
-		return nil, fmt.Errorf("unsupported mode %q", cfg.Mode)
-	}
-	tryDirect := func() (transport.Session, error) {
-		if cfg.DirectAddr == "" || cfg.DirectServerName == "" {
-			return nil, fmt.Errorf("direct endpoint is not configured")
-		}
-		dctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		return transport.DialDirect(dctx, cfg.DirectAddr, &tls.Config{
-			MinVersion:   tls.VersionTLS13,
-			RootCAs:      roots,
-			Certificates: []tls.Certificate{cert},
-			ServerName:   cfg.DirectServerName,
-			NextProtos:   []string{proto.ALPN},
-		})
-	}
-	tryWSS := func() (transport.Session, error) {
-		if cfg.WSURL == "" || cfg.WSInnerServerName == "" {
-			return nil, fmt.Errorf("WebSocket endpoint is not configured")
-		}
-		wctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		defer cancel()
-		return transport.DialWebSocket(wctx, cfg.WSURL, &tls.Config{
-			MinVersion:   tls.VersionTLS13,
-			RootCAs:      roots,
-			Certificates: []tls.Certificate{cert},
-			ServerName:   cfg.WSInnerServerName,
-			NextProtos:   []string{proto.InnerALPN},
-		}, cfg.CFAccessClientID, cfg.CFAccessClientSecret)
+		return nil, fmt.Errorf("unsupported mode %q", d.cfg.Mode)
 	}
 	switch mode {
 	case "direct":
-		return tryDirect()
+		sess, err := d.tryDirect(ctx)
+		if err != nil {
+			return nil, err
+		}
+		d.notePath("direct", sess, "")
+		return sess, nil
 	case "wss":
-		return tryWSS()
+		sess, err := d.tryWSS(ctx)
+		if err != nil {
+			return nil, err
+		}
+		d.notePath("wss", sess, "")
+		return sess, nil
 	default:
-		w, werr := tryWSS()
-		if werr == nil {
-			persistAutoToWSS(cfg, configPath, logger, persistMu)
-			return w, nil
-		}
-		logger.Printf("Cloudflare WSS unavailable, falling back to direct TLS: %v", werr)
-		d, derr := tryDirect()
-		if derr != nil {
-			return nil, fmt.Errorf("WSS failed: %v; direct failed: %w", werr, derr)
-		}
-		return d, nil
+		return d.dialAuto(ctx)
 	}
 }
 
-func persistAutoToWSS(cfg *config.Client, configPath string, logger *log.Logger, persistMu *sync.Mutex) {
-	if persistMu == nil {
+func (d *pathDialer) dialAuto(ctx context.Context) (transport.Session, error) {
+	w, werr := d.tryWSS(ctx)
+	if werr == nil {
+		d.notePath("wss", w, "")
+		return w, nil
+	}
+	prev := d.Current()
+	reason := "WSS unavailable"
+	if prev == "wss" {
+		reason = "WSS connection lost"
+	}
+	d.logger.Printf("auto: %s: %v", reason, werr)
+	sess, derr := d.tryDirect(ctx)
+	if derr != nil {
+		return nil, fmt.Errorf("WSS failed: %v; direct failed: %w", werr, derr)
+	}
+	d.notePath("direct", sess, reason+": "+werr.Error())
+	return sess, nil
+}
+
+func (d *pathDialer) tryDirect(ctx context.Context) (transport.Session, error) {
+	if d.cfg.DirectAddr == "" || d.cfg.DirectServerName == "" {
+		return nil, fmt.Errorf("direct endpoint is not configured")
+	}
+	dctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return transport.DialDirect(dctx, d.cfg.DirectAddr, &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		RootCAs:      d.roots,
+		Certificates: []tls.Certificate{d.cert},
+		ServerName:   d.cfg.DirectServerName,
+		NextProtos:   []string{proto.ALPN},
+	})
+}
+
+func (d *pathDialer) tryWSS(ctx context.Context) (transport.Session, error) {
+	if d.cfg.WSURL == "" || d.cfg.WSInnerServerName == "" {
+		return nil, fmt.Errorf("WebSocket endpoint is not configured")
+	}
+	wctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	return transport.DialWebSocket(wctx, d.cfg.WSURL, &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		RootCAs:      d.roots,
+		Certificates: []tls.Certificate{d.cert},
+		ServerName:   d.cfg.WSInnerServerName,
+		NextProtos:   []string{proto.InnerALPN},
+	}, d.cfg.CFAccessClientID, d.cfg.CFAccessClientSecret)
+}
+
+func (d *pathDialer) notePath(path string, sess transport.Session, changeReason string) {
+	d.mu.Lock()
+	prev := d.current
+	d.current = path
+	d.mu.Unlock()
+
+	kind := ""
+	if sess != nil {
+		kind = sess.Kind()
+	}
+	via, sniKey, sniVal := d.endpointFields(path)
+	if prev != "" && prev != path {
+		reason := changeReason
+		if reason == "" {
+			if path == "wss" {
+				reason = "WSS recovered"
+			} else {
+				reason = "switched"
+			}
+		}
+		d.logger.Printf("auto: path changed %s → %s (%s) via=%s", prev, path, reason, via)
+	}
+	d.logger.Printf("transport: path=%s kind=%s via=%s %s=%s", path, kind, via, sniKey, sniVal)
+}
+
+func (d *pathDialer) endpointFields(path string) (via, sniKey, sniVal string) {
+	if path == "wss" {
+		return d.cfg.WSURL, "inner_sni", d.cfg.WSInnerServerName
+	}
+	return d.cfg.DirectAddr, "sni", d.cfg.DirectServerName
+}
+
+// StartProbe periodically tries WSS while the runtime path is direct, then forces pool reconnect.
+func (d *pathDialer) StartProbe(ctx context.Context, pool *proxymux.Pool) {
+	if d.cfg.WSURL == "" || d.cfg.WSInnerServerName == "" {
 		return
 	}
-	persistMu.Lock()
-	defer persistMu.Unlock()
-	if strings.ToLower(cfg.Mode) != "auto" {
+	if d.cfg.DirectAddr == "" || d.cfg.DirectServerName == "" {
 		return
 	}
-	cfg.Mode = "wss"
-	if configPath == "" {
-		logger.Printf("auto: WSS ok, switched mode to wss (not persisted: no config path)")
-		return
+	ticker := time.NewTicker(autoProbeInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		if d.Current() != "direct" {
+			continue
+		}
+		sess, err := d.tryWSS(ctx)
+		if err != nil {
+			continue
+		}
+		_ = sess.Close()
+		d.logger.Printf("auto: WSS recovered while on direct; reconnecting channels via=%s", d.cfg.WSURL)
+		pool.ReconnectAll()
 	}
-	if err := config.WriteClient(configPath, cfg); err != nil {
-		logger.Printf("auto: WSS ok, switched mode to wss; warn: could not persist %s: %v", configPath, err)
-		return
-	}
-	logger.Printf("auto: WSS ok, switched mode to wss and wrote %s", configPath)
 }

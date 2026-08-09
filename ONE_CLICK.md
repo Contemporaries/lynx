@@ -2,7 +2,7 @@
 
 **English** | [中文](ONE_CLICK.zh-CN.md)
 
-Lynx **v2.2.0** on Linux: local SOCKS5/HTTP; subscribe via nginx **443**; optional direct mTLS **8443**; WSS via Cloudflare Tunnel.
+Lynx **v2.2.2** on Linux: local SOCKS5/HTTP; subscribe via nginx **443**; optional direct mTLS **8443**; WSS via Cloudflare Tunnel.
 
 ## 1. Prerequisites
 

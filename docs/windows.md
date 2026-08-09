@@ -2,7 +2,7 @@
 
 **English** | [中文](windows.zh-CN.md)
 
-Lynx **v2.2.0** single-file client config on Windows.
+Lynx **v2.2.2** single-file client config on Windows.
 
 ## Subscribe and start
 

@@ -121,9 +121,9 @@ With direct enabled, bundles usually use `"mode": "auto"` plus `direct_addr`.
 
 - Direct dial: ~5s
 - WSS dial: ~20s
-- `auto`: try WSS first; on failure log  
-  `Cloudflare WSS unavailable, falling back to direct TLS` then direct.  
-  If WSS succeeds, the client persists `mode=wss` into `client.json`.
+- `auto`: try WSS first; on failure use direct and keep probing WSS every ~15s.
+  Logs include the active path, e.g. `transport: path=wss via=wss://…` or
+  `auto: path changed wss → direct (…) via=host:8443`. Does **not** rewrite `client.json`.
 
 ## Cloudflare Access (optional)
 

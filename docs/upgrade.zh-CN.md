@@ -2,7 +2,7 @@
 
 [English](upgrade.md) | **中文**
 
-Lynx **v2.2.0** 升级路径与 Release 发布说明。
+Lynx **v2.2.2** 升级路径与 Release 发布说明。
 
 ## Release 产物
 
@@ -19,8 +19,8 @@ GitHub Releases（`Contemporaries/lynx`）通常包含：
 2. 打 tag 并推送，例如：
 
 ```bash
-git tag v2.2.0
-git push origin v2.2.0
+git tag v2.2.2
+git push origin v2.2.2
 ```
 
 3. CI（`.github/workflows/release.yml`）构建 CLI 并挂到 Release
@@ -29,7 +29,7 @@ git push origin v2.2.0
 
 ```bash
 sudo ./deploy/upgrade-server.sh
-sudo ./deploy/upgrade-server.sh v2.2.0
+sudo ./deploy/upgrade-server.sh v2.2.2
 sudo lynx-wizard --upgrade-server [tag]
 ```
 

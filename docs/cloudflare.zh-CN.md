@@ -113,9 +113,9 @@ Cloudflare 代理入口：wss://cdn.example.com/_lynx/v1/connect
 
 - 直连 dial：约 5s
 - WSS dial：约 20s
-- `auto`：先试 WSS；失败日志  
-  `Cloudflare WSS unavailable, falling back to direct TLS` 后再直连。  
-  WSS 成功会把 `mode=wss` 写入 `client.json`。
+- `auto`：先试 WSS；失败则用直连，并约每 15s 后台探测 WSS。
+  日志含当前链路，如 `transport: path=wss via=wss://…` 或
+  `auto: path changed wss → direct (…) via=host:8443`。**不会**改写 `client.json`。
 
 ## Cloudflare Access（可选）
 

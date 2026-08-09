@@ -200,6 +200,21 @@ func (p *Pool) HealthyChannels() int {
 	return n
 }
 
+// ReconnectAll closes all sessions without shutting down the pool so maintain() can refill them.
+func (p *Pool) ReconnectAll() {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
+	sessions := append([]*clientSession(nil), p.sessions...)
+	p.sessions = nil
+	p.mu.Unlock()
+	for _, s := range sessions {
+		_ = s.Close()
+	}
+}
+
 func (p *Pool) Close() error {
 	p.mu.Lock()
 	if p.closed {

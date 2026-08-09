@@ -2,7 +2,7 @@
 
 **English** | [中文](upgrade.zh-CN.md)
 
-Lynx **v2.2.0** upgrade paths and how releases are published.
+Lynx **v2.2.2** upgrade paths and how releases are published.
 
 ## Release artifacts
 
@@ -19,8 +19,8 @@ GitHub Releases (`Contemporaries/lynx`) typically include:
 2. Tag and push (example):
 
 ```bash
-git tag v2.2.0
-git push origin v2.2.0
+git tag v2.2.2
+git push origin v2.2.2
 ```
 
 3. CI (`.github/workflows/release.yml`) builds CLI artifacts and attaches them to the release.
@@ -30,7 +30,7 @@ git push origin v2.2.0
 ```bash
 sudo ./deploy/upgrade-server.sh
 # or pin a tag:
-sudo ./deploy/upgrade-server.sh v2.2.0
+sudo ./deploy/upgrade-server.sh v2.2.2
 sudo lynx-wizard --upgrade-server [tag]
 ```
 

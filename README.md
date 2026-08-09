@@ -2,7 +2,7 @@
 
 **English** | [中文](README.zh-CN.md)
 
-Lynx **v2.2.0** is an encrypted TCP proxy: apps use local SOCKS5 / HTTP, and the client reaches the server over **direct mTLS** or **Cloudflare WebSocket**. The inner tunnel is TLS 1.3 with per-device mTLS.
+Lynx **v2.2.2** is an encrypted TCP proxy: apps use local SOCKS5 / HTTP, and the client reaches the server over **direct mTLS** or **Cloudflare WebSocket**. The inner tunnel is TLS 1.3 with per-device mTLS.
 
 It is **not** a system VPN: no TUN device, no default route or system DNS changes.
 
@@ -60,7 +60,7 @@ Subscribe and direct must not share the same port.
 | Exposure | Open TCP **8443** | Direct port can stay closed |
 | Metadata | Straight to your server | CF sees connection metadata; cannot decrypt inner TLS |
 
-Client `mode`: `direct` / `wss` / `auto` (default: try WSS first, fall back to direct; if WSS works, persist `mode=wss`). Full comparison: [docs/transport.md](docs/transport.md).
+Client `mode`: `direct` / `wss` / `auto` (default: try WSS first, fall back to direct; while on direct, probe WSS in the background — runtime only, does not rewrite `client.json`). Logs print the active path (`path` / `via`). Full comparison: [docs/transport.md](docs/transport.md).
 
 ## Install (clone → install)
 

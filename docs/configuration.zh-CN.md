@@ -2,7 +2,7 @@
 
 [English](configuration.md) | **中文**
 
-Lynx **v2.2.0** 分步配置：端口、nginx 订阅、server/client JSON、验证。Tunnel/Access 详见 [cloudflare.zh-CN.md](cloudflare.zh-CN.md)；威胁模型与控制项见 [security.zh-CN.md](security.zh-CN.md)。
+Lynx **v2.2.2** 分步配置：端口、nginx 订阅、server/client JSON、验证。Tunnel/Access 详见 [cloudflare.zh-CN.md](cloudflare.zh-CN.md)；威胁模型与控制项见 [security.zh-CN.md](security.zh-CN.md)。
 
 ## 架构（端口）
 
@@ -144,7 +144,7 @@ DNS、Access 等：[cloudflare.zh-CN.md](cloudflare.zh-CN.md)。
 | 字段 | 默认 | 含义 |
 |---|---|---|
 | `subscribe_url` | — | 拉取 profile |
-| `mode` | `auto` | `direct` / `wss` / `auto`（auto：先 WSS 再直连；WSS 成功会持久化为 `wss`） |
+| `mode` | `auto` | `direct` / `wss` / `auto`（auto：先 WSS 再直连；直连时探测 WSS；不改写 JSON） |
 | `direct_addr` | — | 如 `direct.example.com:8443` |
 | `direct_server_name` | — | 直连 SNI |
 | `ws_url` | 订阅写入 | 如 `wss://cdn.example.com/_lynx/v1/connect` |

@@ -2,7 +2,7 @@
 
 **English** | [中文](development.zh-CN.md)
 
-Build and test Lynx **v2.2.0** from source.
+Build and test Lynx **v2.2.2** from source.
 
 ## Requirements
 

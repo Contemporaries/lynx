@@ -2,7 +2,7 @@
 
 [English](README.md) | **中文**
 
-Lynx **v2.2.0** 是一套加密 TCP 代理：应用走本机 SOCKS5 / HTTP，客户端经 **直连 mTLS** 或 **Cloudflare WebSocket** 到达服务端；内层为 TLS 1.3 + 每设备 mTLS。
+Lynx **v2.2.2** 是一套加密 TCP 代理：应用走本机 SOCKS5 / HTTP，客户端经 **直连 mTLS** 或 **Cloudflare WebSocket** 到达服务端；内层为 TLS 1.3 + 每设备 mTLS。
 
 不是系统 VPN：不创建 TUN，不改默认路由或系统 DNS。
 
@@ -60,7 +60,7 @@ Lynx **v2.2.0** 是一套加密 TCP 代理：应用走本机 SOCKS5 / HTTP，客
 | 暴露面 | 需开放 TCP **8443** | 可不对公网开直连口 |
 | 元数据 | 直达你的服务器 | CF 可见连接元数据，不能解内层 TLS |
 
-客户端 `mode`：`direct` / `wss` / `auto`（默认先试 WSS，失败再直连；WSS 成功会持久化为 `mode=wss`）。完整对比：[docs/transport.zh-CN.md](docs/transport.zh-CN.md)。
+客户端 `mode`：`direct` / `wss` / `auto`（默认先试 WSS，失败再直连；跑在直连时后台探测 WSS——仅运行时切换，不改写 `client.json`）。日志会打印当前链路（`path` / `via`）。完整对比：[docs/transport.zh-CN.md](docs/transport.zh-CN.md)。
 
 ## 安装（clone → install）
 

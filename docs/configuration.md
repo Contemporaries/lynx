@@ -2,7 +2,7 @@
 
 **English** | [中文](configuration.zh-CN.md)
 
-Step-by-step setup for Lynx **v2.2.0**: ports, nginx subscribe, server/client JSON, and verification. For Tunnel/Access detail see [cloudflare.md](cloudflare.md). For controls and threat model see [security.md](security.md).
+Step-by-step setup for Lynx **v2.2.2**: ports, nginx subscribe, server/client JSON, and verification. For Tunnel/Access detail see [cloudflare.md](cloudflare.md). For controls and threat model see [security.md](security.md).
 
 ## Architecture (ports)
 
@@ -159,7 +159,7 @@ Or use the wizard-generated bundle (already contains PEM + endpoints).
 | Field | Default | Meaning |
 |---|---|---|
 | `subscribe_url` | — | Profile fetch URL |
-| `mode` | `auto` | `direct` / `wss` / `auto` (auto: WSS first, then direct; WSS success → persist `wss`) |
+| `mode` | `auto` | `direct` / `wss` / `auto` (auto: WSS first, then direct; probe WSS while on direct; no JSON rewrite) |
 | `direct_addr` | — | e.g. `direct.example.com:8443` |
 | `direct_server_name` | — | TLS SNI for direct |
 | `ws_url` | from subscribe | e.g. `wss://cdn.example.com/_lynx/v1/connect` |
