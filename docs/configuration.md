@@ -22,11 +22,13 @@ Apps → SOCKS5/HTTP (localhost)
          Lynx server also serves subscribe on :8080 (via nginx on 443)
 ```
 
-## Recommended path: one-click wizard
+## Recommended path: clone → install
 
 On a Linux server (root):
 
 ```bash
+git clone https://github.com/Contemporaries/lynx.git
+cd lynx
 ./deploy/build.sh
 sudo ./lynx-wizard.sh
 # or: sudo ./install.sh
@@ -157,7 +159,7 @@ Or use the wizard-generated bundle (already contains PEM + endpoints).
 | Field | Default | Meaning |
 |---|---|---|
 | `subscribe_url` | — | Profile fetch URL |
-| `mode` | `auto` | `direct` / `wss` / `auto` |
+| `mode` | `auto` | `direct` / `wss` / `auto` (auto: WSS first, then direct; WSS success → persist `wss`) |
 | `direct_addr` | — | e.g. `direct.example.com:8443` |
 | `direct_server_name` | — | TLS SNI for direct |
 | `ws_url` | from subscribe | e.g. `wss://cdn.example.com/_lynx/v1/connect` |

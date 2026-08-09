@@ -109,12 +109,13 @@ Cloudflare 代理入口：wss://cdn.example.com/_lynx/v1/connect
 
 启用直连时，包里通常是 `"mode": "auto"` 并带 `direct_addr`。
 
-### 超时
+### 超时与 `auto`
 
 - 直连 dial：约 5s
 - WSS dial：约 20s
-- `auto`：先直连；失败日志  
-  `direct TLS unavailable, falling back to Cloudflare WSS` 后再 WSS
+- `auto`：先试 WSS；失败日志  
+  `Cloudflare WSS unavailable, falling back to direct TLS` 后再直连。  
+  WSS 成功会把 `mode=wss` 写入 `client.json`。
 
 ## Cloudflare Access（可选）
 

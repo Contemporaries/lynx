@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Contemporaries/lynx/internal/config"
@@ -23,11 +24,12 @@ func Run(ctx context.Context, cfgPath string, logger *log.Logger) error {
 	if err != nil {
 		return err
 	}
-	return RunConfig(ctx, cfg, logger)
+	return RunConfig(ctx, cfg, logger, cfgPath)
 }
 
 // RunConfig starts the proxy client with an already-loaded config.
-func RunConfig(ctx context.Context, cfg *config.Client, logger *log.Logger) error {
+// If configPath is non-empty and mode is auto, a successful WSS dial persists mode=wss.
+func RunConfig(ctx context.Context, cfg *config.Client, logger *log.Logger, configPath string) error {
 	if logger == nil {
 		logger = log.Default()
 	}
@@ -42,8 +44,9 @@ func RunConfig(ctx context.Context, cfg *config.Client, logger *log.Logger) erro
 	if err != nil {
 		return err
 	}
+	var persistMu sync.Mutex
 	dial := func(dctx context.Context) (transport.Session, error) {
-		return dialTransport(dctx, cfg, cert, roots)
+		return dialTransport(dctx, cfg, cert, roots, logger, configPath, &persistMu)
 	}
 	pool, err := proxymux.NewPoolWithOptions(ctx, proxymux.PoolOptions{
 		Channels:          cfg.ProxyChannels,
@@ -66,7 +69,10 @@ func RunConfig(ctx context.Context, cfg *config.Client, logger *log.Logger) erro
 	})
 }
 
-func dialTransport(ctx context.Context, cfg *config.Client, cert tls.Certificate, roots *x509.CertPool) (transport.Session, error) {
+func dialTransport(ctx context.Context, cfg *config.Client, cert tls.Certificate, roots *x509.CertPool, logger *log.Logger, configPath string, persistMu *sync.Mutex) (transport.Session, error) {
+	if logger == nil {
+		logger = log.Default()
+	}
 	mode := strings.ToLower(cfg.Mode)
 	if mode != "auto" && mode != "direct" && mode != "wss" {
 		return nil, fmt.Errorf("unsupported mode %q", cfg.Mode)
@@ -105,15 +111,37 @@ func dialTransport(ctx context.Context, cfg *config.Client, cert tls.Certificate
 	case "wss":
 		return tryWSS()
 	default:
-		d, derr := tryDirect()
-		if derr == nil {
-			return d, nil
-		}
-		log.Printf("direct TLS unavailable, falling back to Cloudflare WSS: %v", derr)
 		w, werr := tryWSS()
-		if werr != nil {
-			return nil, fmt.Errorf("direct failed: %v; WSS failed: %w", derr, werr)
+		if werr == nil {
+			persistAutoToWSS(cfg, configPath, logger, persistMu)
+			return w, nil
 		}
-		return w, nil
+		logger.Printf("Cloudflare WSS unavailable, falling back to direct TLS: %v", werr)
+		d, derr := tryDirect()
+		if derr != nil {
+			return nil, fmt.Errorf("WSS failed: %v; direct failed: %w", werr, derr)
+		}
+		return d, nil
 	}
+}
+
+func persistAutoToWSS(cfg *config.Client, configPath string, logger *log.Logger, persistMu *sync.Mutex) {
+	if persistMu == nil {
+		return
+	}
+	persistMu.Lock()
+	defer persistMu.Unlock()
+	if strings.ToLower(cfg.Mode) != "auto" {
+		return
+	}
+	cfg.Mode = "wss"
+	if configPath == "" {
+		logger.Printf("auto: WSS ok, switched mode to wss (not persisted: no config path)")
+		return
+	}
+	if err := config.WriteClient(configPath, cfg); err != nil {
+		logger.Printf("auto: WSS ok, switched mode to wss; warn: could not persist %s: %v", configPath, err)
+		return
+	}
+	logger.Printf("auto: WSS ok, switched mode to wss and wrote %s", configPath)
 }

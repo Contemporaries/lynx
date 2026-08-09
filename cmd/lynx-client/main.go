@@ -99,7 +99,7 @@ func main() {
 		log.Fatal("config has no inline credentials; set subscribe_url or certificate/key/certificate_authority")
 	}
 
-	if err := appclient.RunConfig(ctx, cfg, log.Default()); err != nil && !errors.Is(err, context.Canceled) {
+	if err := appclient.RunConfig(ctx, cfg, log.Default(), *configPath); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatal(err)
 	}
 }

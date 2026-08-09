@@ -117,12 +117,13 @@ Client fields (after subscribe / wizard bundle):
 
 With direct enabled, bundles usually use `"mode": "auto"` plus `direct_addr`.
 
-### Timeouts
+### Timeouts and `auto`
 
 - Direct dial: ~5s
 - WSS dial: ~20s
-- `auto`: try direct first; on failure log  
-  `direct TLS unavailable, falling back to Cloudflare WSS` then WSS
+- `auto`: try WSS first; on failure log  
+  `Cloudflare WSS unavailable, falling back to direct TLS` then direct.  
+  If WSS succeeds, the client persists `mode=wss` into `client.json`.
 
 ## Cloudflare Access (optional)
 

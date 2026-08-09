@@ -31,24 +31,24 @@
 |---|---|
 | `"direct"` | 只用直连 |
 | `"wss"` | 只用 WSS |
-| `"auto"`（默认） | 先试直连（约 5s），失败再回退 WSS |
+| `"auto"`（默认） | 先试 WSS（约 20s），失败再直连（约 5s）。WSS 成功会把 `mode=wss` 写入 `client.json` |
 
-一键安装且启用直连时，客户端包通常为 `"mode": "auto"`。
+一键安装且启用直连时，客户端包通常以 `"mode": "auto"` 起步。
 
 ## 怎么选
 
-- 优先速度、8443 稳通 → 直连（或保持 `auto`）
-- 公司网 / 严格防火墙 / 不想暴露 8443 → WSS
-- 两边都要 → `auto`
+- 优先走 Cloudflare / 严格防火墙 → 保持 `auto` 或设为 `wss`
+- 8443 稳定且要最低延迟 → 设为 `direct`
+- 先探测再固定 WSS → `auto`（首次 WSS 成功后锁定为 `wss`）
 
 Tunnel 与 Access：[cloudflare.zh-CN.md](cloudflare.zh-CN.md)。安全含义：[security.zh-CN.md](security.zh-CN.md)。
 
 ## 如何判断当前走的哪条路
 
-1. **看配置**：`mode` 为 `direct` / `wss` 时路径已固定。
-2. **`auto` 看日志**：出现  
-   `direct TLS unavailable, falling back to Cloudflare WSS`  
-   → 该次 dial 为 WSS；无此条且已 `proxy transport ready` → 很大概率直连成功。重连可能再选；多通道可能各自不同。
+1. **看配置**：`mode` 为 `direct` / `wss` 时路径已固定。auto 成功走 WSS 后，文件里通常已是 `"mode": "wss"`。
+2. **看日志**：  
+   `auto: WSS ok, switched mode to wss…` → 已用 WSS 并持久化。  
+   `Cloudflare WSS unavailable, falling back to direct TLS` → 该次 dial 走直连。
 3. **看出站连接**：
 
 ```bash

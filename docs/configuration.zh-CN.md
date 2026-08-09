@@ -22,9 +22,11 @@ Lynx **v2.2.0** 分步配置：端口、nginx 订阅、server/client JSON、验�
          Lynx 服务端同时在 :8080 提供订阅（经 nginx 443）
 ```
 
-## 推荐：一键向导
+## 推荐：clone → install
 
 ```bash
+git clone https://github.com/Contemporaries/lynx.git
+cd lynx
 ./deploy/build.sh
 sudo ./lynx-wizard.sh
 ```
@@ -142,7 +144,7 @@ DNS、Access 等：[cloudflare.zh-CN.md](cloudflare.zh-CN.md)。
 | 字段 | 默认 | 含义 |
 |---|---|---|
 | `subscribe_url` | — | 拉取 profile |
-| `mode` | `auto` | `direct` / `wss` / `auto` |
+| `mode` | `auto` | `direct` / `wss` / `auto`（auto：先 WSS 再直连；WSS 成功会持久化为 `wss`） |
 | `direct_addr` | — | 如 `direct.example.com:8443` |
 | `direct_server_name` | — | 直连 SNI |
 | `ws_url` | 订阅写入 | 如 `wss://cdn.example.com/_lynx/v1/connect` |

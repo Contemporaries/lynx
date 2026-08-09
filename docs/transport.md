@@ -33,27 +33,25 @@ In `client.json`:
 |---|---|
 | `"direct"` | Direct only |
 | `"wss"` | WSS only |
-| `"auto"` (default) | Try direct (~5s), then fall back to WSS |
+| `"auto"` (default) | Try WSS first (~20s), then fall back to direct (~5s). If WSS succeeds, persist `mode=wss` into `client.json` |
 
-One-click bundles with direct enabled usually set `"mode": "auto"`.
+One-click bundles with direct enabled usually start as `"mode": "auto"`.
 
 ## Choosing
 
-- Prefer speed and stable 8443 → direct (or keep `auto`)
-- Strict firewall / no public 8443 → WSS, or bind direct to localhost only
-- Want both → `auto`
+- Prefer Cloudflare path / strict firewall → keep `auto` or set `wss`
+- Prefer lowest latency on a stable 8443 → set `direct`
+- Want probe-then-stick-to-WSS → `auto` (locks to `wss` after first WSS success)
 
 More on Tunnel and Access: [cloudflare.md](cloudflare.md). Security implications: [security.md](security.md).
 
 ## Which path is active?
 
-Successful dials do **not** always print “using direct / WSS”. Ways to tell:
-
-1. **Config**: `mode` is `direct` or `wss` → fixed.
-2. **`auto` logs**:  
-   `direct TLS unavailable, falling back to Cloudflare WSS`  
-   → that dial used WSS; no such line and `proxy transport ready` → likely direct. Reconnects may re-choose; channels can differ.
-3. **Outbound sockets** (most reliable):
+1. **Config**: `mode` is `direct` or `wss` → fixed. After a successful auto→WSS, the file usually shows `"mode": "wss"`.
+2. **Logs**:  
+   `auto: WSS ok, switched mode to wss…` → WSS and persisted.  
+   `Cloudflare WSS unavailable, falling back to direct TLS` → that dial used direct.
+3. **Outbound sockets**:
 
 ```bash
 ss -tnp | grep -E 'lynx-client|8443'

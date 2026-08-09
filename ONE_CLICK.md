@@ -1,85 +1,89 @@
-# One-click deploy (Linux)
+# Install: clone → build → wizard
 
 **English** | [中文](ONE_CLICK.zh-CN.md)
 
-For Lynx **v2.2.0**: local SOCKS5/HTTP; subscribe via nginx **443**; direct mTLS **8443**; WSS via Cloudflare Tunnel.
+Lynx **v2.2.0** on Linux: local SOCKS5/HTTP; subscribe via nginx **443**; optional direct mTLS **8443**; WSS via Cloudflare Tunnel.
 
-Deep dives: [docs/configuration.md](docs/configuration.md) · [docs/cloudflare.md](docs/cloudflare.md) · [docs/security.md](docs/security.md).
+## 1. Prerequisites
 
-## Before you start
+1. Go **1.24+** on the build machine (`go version`)
+2. CDN hostname on Cloudflare (e.g. `cdn.example.com`) for WSS
+3. Subscribe hostname with a public TLS cert + nginx (e.g. `subscribe.example.com` on **443** — not port **8443**)
+4. Optional: open **TCP 8443** if you enable direct
+5. Browser for `cloudflared tunnel login`
 
-1. CDN hostname already on Cloudflare (e.g. `cdn.example.com`) for WSS
-2. Subscribe hostname with a public certificate + nginx (e.g. `subscribe.example.com`, default **443** — do **not** use direct port **8443**)
-3. Optional: open **TCP 8443** if you want direct acceleration
-4. Browser available for `cloudflared tunnel login`
-
-## Deploy server
+## 2. Clone and build
 
 ```bash
+git clone https://github.com/Contemporaries/lynx.git
+cd lynx
 ./deploy/build.sh
+```
+
+## 3. Install (wizard)
+
+```bash
 sudo ./lynx-wizard.sh
 # equivalent: sudo ./install.sh
 ```
 
-Wizard prompts (typical):
+Typical prompts:
 
 1. CDN hostname — e.g. `cdn.example.com`
 2. Subscribe hostname — e.g. `subscribe.example.com`
-3. Enable direct? (open TCP 8443) — default no
+3. Enable direct? (TCP 8443) — default no
 4. Direct hostname if enabled — e.g. `direct.example.com` (**DNS only** / grey cloud)
 5. First device name — default `laptop`
-6. Optional Cloudflare Access Service Token (Client-Id / Secret)
+6. Optional Cloudflare Access Service Token
 
-What the wizard sets up:
+What gets installed:
 
-- `lynx-server` / `lynx-cloudflared` (and related paths under `/etc/lynx`)
+- Binaries + `lynx-server` / `lynx-cloudflared` systemd units
 - PKI under `/etc/lynx/pki` and `/etc/lynx/certs` — **back up `ca.key`**
-- Tunnel ingress: only `/_lynx/v1/connect` → `127.0.0.1:8080`
-- Client bundle with subscribe URL (and direct fields if enabled)
+- Tunnel: only `/_lynx/v1/connect` → `127.0.0.1:8080`
+- Client bundle (subscribe URL; direct fields if enabled)
 
-Then add nginx for subscribe: [deploy/nginx-subscribe.conf.example](deploy/nginx-subscribe.conf.example).
+## 4. nginx subscribe
+
+Add the location from [deploy/nginx-subscribe.conf.example](deploy/nginx-subscribe.conf.example), reload nginx.
 
 ```bash
 sudo lynx-wizard --show-subscribe
 sudo systemctl status lynx-server lynx-cloudflared
+curl -sS http://127.0.0.1:8080/_lynx/v1/version
 ```
 
-Expected prints:
+Expected:
 
 ```text
 Cloudflare proxy entry: wss://cdn.example.com/_lynx/v1/connect
 Subscribe URL: https://subscribe.example.com/_lynx/v1/subscribe/<token>
 ```
 
-If direct is on, also ensure security group TCP 8443 and grey-cloud DNS for the direct name.
+## 5. Client
 
-## Add a device
-
-```bash
-sudo lynx-wizard --add-device
-# or menu option in lynx-wizard.sh
-```
-
-## Install client (Linux)
-
-Use the generated package / instructions from the wizard (typically install binary + `client.json` + systemd `lynx-client`).
-
-Or manually:
+Use the wizard-generated package, or:
 
 ```bash
-sudo install -m 755 lynx-client-linux-amd64 /usr/local/bin/lynx-client
+sudo install -m 755 dist/lynx-client-linux-amd64 /usr/local/bin/lynx-client
 sudo lynx-client -subscribe 'https://subscribe.example.com/_lynx/v1/subscribe/<token>' \
   -config /etc/lynx/client.json
 ```
 
-## Verify
+More devices:
+
+```bash
+sudo lynx-wizard --add-device
+```
+
+## 6. Verify
 
 ```bash
 curl --socks5-hostname 127.0.0.1:1080 https://ifconfig.me
 curl -x http://127.0.0.1:8080 https://ifconfig.me
 ```
 
-## Useful wizard commands
+## Useful commands
 
 ```bash
 sudo lynx-wizard --status
@@ -91,4 +95,4 @@ sudo lynx-wizard --uninstall-client
 sudo lynx-wizard --uninstall
 ```
 
-Interactive menu: first deploy, add device, status, subscribe probe, upgrades, uninstall.
+Deep dives: [docs/configuration.md](docs/configuration.md) · [docs/cloudflare.md](docs/cloudflare.md) · [docs/security.md](docs/security.md) · [docs/transport.md](docs/transport.md).

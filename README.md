@@ -60,112 +60,65 @@ Subscribe and direct must not share the same port.
 | Exposure | Open TCP **8443** | Direct port can stay closed |
 | Metadata | Straight to your server | CF sees connection metadata; cannot decrypt inner TLS |
 
-Client `mode`: `direct` / `wss` / `auto` (default: try direct, fall back to WSS). Full comparison: [docs/transport.md](docs/transport.md).
+Client `mode`: `direct` / `wss` / `auto` (default: try WSS first, fall back to direct; if WSS works, persist `mode=wss`). Full comparison: [docs/transport.md](docs/transport.md).
 
-## Download
+## Install (clone → install)
 
-**https://github.com/Contemporaries/lynx/releases**
-
-| Artifact | Notes |
-|---|---|
-| `lynx-server-linux-amd64` / `arm64` | Server |
-| `lynx-client-linux-amd64` / `arm64` | Linux client |
-| `lynx-client-windows-amd64.exe` | Windows client |
-| `SHA256SUMS` | Checksums |
-
-## Documentation
-
-| Doc | Contents |
-|---|---|
-| [ONE_CLICK.md](ONE_CLICK.md) | Linux one-click deploy |
-| [docs/configuration.md](docs/configuration.md) | Config steps, nginx, server/client JSON |
-| [docs/cloudflare.md](docs/cloudflare.md) | Tunnel, DNS, Access, WSS path |
-| [docs/security.md](docs/security.md) | mTLS, tokens, limits, CDN visibility |
-| [docs/transport.md](docs/transport.md) | Direct vs WSS |
-| [docs/development.md](docs/development.md) | Build from source |
-| [docs/windows.md](docs/windows.md) | Windows client |
-| [docs/upgrade.md](docs/upgrade.md) | Upgrade and releases |
-| [docs/uninstall.md](docs/uninstall.md) | Uninstall |
-
-中文文档：见各文件的 `*.zh-CN.md`（例如 [README.zh-CN.md](README.zh-CN.md)）。
-
-## Quick start
-
-### Build
+Recommended path on a Linux server (root). Needs Go **1.24+** to build, a Cloudflare CDN hostname for WSS, and a subscribe hostname with nginx HTTPS (443).
 
 ```bash
-# Go 1.24+
-go test ./...
-./deploy/build.sh
-```
-
-See [docs/development.md](docs/development.md).
-
-### Server (recommended: wizard)
-
-```bash
+git clone https://github.com/Contemporaries/lynx.git
+cd lynx
 ./deploy/build.sh
 sudo ./lynx-wizard.sh
+# same as: sudo ./install.sh
 ```
 
-The wizard configures Cloudflare Tunnel, PKI, `server.json`, and a client bundle. Subscribe URL shape:
+The wizard installs binaries, PKI, Cloudflare Tunnel, `server.json`, systemd units, and a client bundle. Then:
 
-```text
-https://subscribe.example.com/_lynx/v1/subscribe/<token>
-```
-
-nginx snippet: [deploy/nginx-subscribe.conf.example](deploy/nginx-subscribe.conf.example). Back up `/etc/lynx/pki/ca.key`.
-
-Detailed steps: [docs/configuration.md](docs/configuration.md) · Cloudflare: [docs/cloudflare.md](docs/cloudflare.md).
-
-### Server config (essentials)
-
-```json
-{
-  "direct_listen": ":8443",
-  "public_base_url": "https://subscribe.example.com",
-  "cdn_base_url": "https://cdn.example.com",
-  "ws_path": "/_lynx/v1/connect",
-  "subscribe_path_prefix": "/_lynx/v1/subscribe/",
-  "clients": {
-    "laptop": {
-      "certificate_sha256": "<fingerprint>",
-      "enabled": true,
-      "subscribe_token": "<token>",
-      "cert_file": "/etc/lynx/pki/laptop.crt",
-      "key_file": "/etc/lynx/pki/laptop.key"
-    }
-  }
-}
-```
-
-Full samples: [configs/server.json](configs/server.json), [configs/client.json](configs/client.json).
-
-### Client
+1. Add nginx subscribe reverse proxy: [deploy/nginx-subscribe.conf.example](deploy/nginx-subscribe.conf.example)
+2. Back up `/etc/lynx/pki/ca.key`
+3. Install the client package / run subscribe on each device
 
 ```bash
+sudo lynx-wizard --show-subscribe
+sudo systemctl status lynx-server lynx-cloudflared
+
+# Client (from wizard package, or):
 lynx-client -subscribe 'https://subscribe.example.com/_lynx/v1/subscribe/<token>' \
   -config /etc/lynx/client.json
-
-lynx-client -config /etc/lynx/client.json
 ```
 
-Minimal config:
-
-```json
-{
-  "subscribe_url": "https://subscribe.example.com/_lynx/v1/subscribe/<token>"
-}
-```
-
-After a successful subscribe, the same file receives inline PEMs. Verify:
+Verify:
 
 ```bash
 curl --socks5-hostname 127.0.0.1:1080 https://ifconfig.me
 curl -x http://127.0.0.1:8080 https://ifconfig.me
 ```
 
-Windows: [docs/windows.md](docs/windows.md).
+Step-by-step checklist: [ONE_CLICK.md](ONE_CLICK.md). Config / Cloudflare / security: [docs/configuration.md](docs/configuration.md) · [docs/cloudflare.md](docs/cloudflare.md) · [docs/security.md](docs/security.md).
+
+### Prebuilt binaries
+
+**https://github.com/Contemporaries/lynx/releases** — `lynx-server` / `lynx-client` for linux amd64/arm64, Windows client, `SHA256SUMS`.
+
+Windows client: [docs/windows.md](docs/windows.md).
+
+## Documentation
+
+| Doc | Contents |
+|---|---|
+| [ONE_CLICK.md](ONE_CLICK.md) | Clone → build → wizard install |
+| [docs/configuration.md](docs/configuration.md) | nginx, server/client JSON |
+| [docs/cloudflare.md](docs/cloudflare.md) | Tunnel, DNS, Access, WSS |
+| [docs/security.md](docs/security.md) | mTLS, tokens, limits |
+| [docs/transport.md](docs/transport.md) | Direct vs WSS |
+| [docs/development.md](docs/development.md) | Dev build / tests |
+| [docs/windows.md](docs/windows.md) | Windows client |
+| [docs/upgrade.md](docs/upgrade.md) | Upgrade and releases |
+| [docs/uninstall.md](docs/uninstall.md) | Uninstall |
+
+中文：[README.zh-CN.md](README.zh-CN.md) and `*.zh-CN.md` docs.
 
 ## Upgrade / uninstall
 
