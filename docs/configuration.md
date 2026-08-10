@@ -2,7 +2,7 @@
 
 **English** | [中文](configuration.zh-CN.md)
 
-Step-by-step setup for Lynx **v2.2.2**: ports, nginx subscribe, server/client JSON, and verification. For Tunnel/Access detail see [cloudflare.md](cloudflare.md). For controls and threat model see [security.md](security.md).
+Step-by-step setup for Lynx **v2.3.0**: ports, nginx subscribe, server/client JSON, and verification. For Tunnel/Access detail see [cloudflare.md](cloudflare.md). For controls and threat model see [security.md](security.md).
 
 ## Architecture (ports)
 
@@ -93,6 +93,8 @@ Runtime path: `/etc/lynx/server.json`. Example: [configs/server.json](../configs
 | `clients.<name>` | Per-device auth + subscribe material |
 | `allow_private_networks` | Default `false` — block RFC1918 etc. |
 | `security` | Rate/session limits — see [security.md](security.md) |
+| `log.level` | `debug`/`info`/`warn`/`error` — see [logging.md](logging.md) |
+| `mgmt` | Optional API listen/secret — see [mgmt-api.md](mgmt-api.md) / [webui.md](webui.md) |
 
 ### Per-client entry
 

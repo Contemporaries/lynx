@@ -2,7 +2,7 @@
 
 **English** | [中文](README.zh-CN.md)
 
-Lynx **v2.2.2** is an encrypted TCP proxy: apps use local SOCKS5 / HTTP, and the client reaches the server over **direct mTLS** or **Cloudflare WebSocket**. The inner tunnel is TLS 1.3 with per-device mTLS.
+Lynx **v2.3.0** is an encrypted TCP proxy: apps use local SOCKS5 / HTTP, and the client reaches the server over **direct mTLS** or **Cloudflare WebSocket**. The inner tunnel is TLS 1.3 with per-device mTLS.
 
 It is **not** a system VPN: no TUN device, no default route or system DNS changes.
 
@@ -32,6 +32,7 @@ Direct mTLS :8443   Cloudflare WSS
 - Multiplexed connection pool; private destinations blocked by default
 - Non-loopback local listen requires proxy authentication
 - Linux / Windows CLI; systemd one-click deploy
+- Graded traffic logs (`log.level`) and optional management API + separate Web UI
 
 ## Non-goals
 
@@ -110,6 +111,9 @@ Windows client: [docs/windows.md](docs/windows.md).
 |---|---|
 | [ONE_CLICK.md](ONE_CLICK.md) | Clone → build → wizard install |
 | [docs/configuration.md](docs/configuration.md) | nginx, server/client JSON |
+| [docs/logging.md](docs/logging.md) | Traffic log levels |
+| [docs/mgmt-api.md](docs/mgmt-api.md) | Optional management API |
+| [docs/webui.md](docs/webui.md) | Separate Web UI binaries |
 | [docs/cloudflare.md](docs/cloudflare.md) | Tunnel, DNS, Access, WSS |
 | [docs/security.md](docs/security.md) | mTLS, tokens, limits |
 | [docs/transport.md](docs/transport.md) | Direct vs WSS |

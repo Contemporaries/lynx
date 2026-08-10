@@ -2,7 +2,7 @@
 
 [English](README.md) | **中文**
 
-Lynx **v2.2.2** 是一套加密 TCP 代理：应用走本机 SOCKS5 / HTTP，客户端经 **直连 mTLS** 或 **Cloudflare WebSocket** 到达服务端；内层为 TLS 1.3 + 每设备 mTLS。
+Lynx **v2.3.0** 是一套加密 TCP 代理：应用走本机 SOCKS5 / HTTP，客户端经 **直连 mTLS** 或 **Cloudflare WebSocket** 到达服务端；内层为 TLS 1.3 + 每设备 mTLS。
 
 不是系统 VPN：不创建 TUN，不改默认路由或系统 DNS。
 
@@ -32,6 +32,7 @@ Lynx **v2.2.2** 是一套加密 TCP 代理：应用走本机 SOCKS5 / HTTP，客
 - 多路复用连接池；默认禁止代理到私有网段
 - 非本机监听时强制本地代理认证
 - Linux / Windows CLI；systemd 一键部署
+- 分级流量日志（`log.level`）、可选管理 API 与独立 Web UI
 
 ## 非目标
 
@@ -111,6 +112,9 @@ Windows：[docs/windows.zh-CN.md](docs/windows.zh-CN.md)。
 |---|---|
 | [ONE_CLICK.zh-CN.md](ONE_CLICK.zh-CN.md) | clone → build → 向导安装 |
 | [docs/configuration.zh-CN.md](docs/configuration.zh-CN.md) | nginx、server/client JSON |
+| [docs/logging.zh-CN.md](docs/logging.zh-CN.md) | 流量日志级别 |
+| [docs/mgmt-api.zh-CN.md](docs/mgmt-api.zh-CN.md) | 可选管理 API |
+| [docs/webui.zh-CN.md](docs/webui.zh-CN.md) | 独立 Web UI |
 | [docs/cloudflare.zh-CN.md](docs/cloudflare.zh-CN.md) | Tunnel、DNS、Access、WSS |
 | [docs/security.zh-CN.md](docs/security.zh-CN.md) | mTLS、token、限流 |
 | [docs/transport.zh-CN.md](docs/transport.zh-CN.md) | 直连与 WSS |

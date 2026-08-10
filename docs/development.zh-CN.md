@@ -2,7 +2,7 @@
 
 [English](development.md) | **中文**
 
-从源码构建与测试 Lynx **v2.2.2**。
+从源码构建与测试 Lynx **v2.3.0**。
 
 ## 依赖
 

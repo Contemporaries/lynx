@@ -13,7 +13,10 @@ import (
 
 	"github.com/Contemporaries/lynx/internal/appclient"
 	"github.com/Contemporaries/lynx/internal/config"
+	"github.com/Contemporaries/lynx/internal/logx"
+	"github.com/Contemporaries/lynx/internal/mgmt"
 	"github.com/Contemporaries/lynx/internal/subscribe"
+	"github.com/Contemporaries/lynx/internal/upgrade"
 	"github.com/Contemporaries/lynx/internal/version"
 )
 
@@ -21,6 +24,7 @@ func main() {
 	configPath := flag.String("config", "/etc/lynx/client.json", "single client JSON config")
 	subscribeURL := flag.String("subscribe", "", "subscription URL; fetches and writes inline PEMs into -config")
 	subscribeRefresh := flag.Int("subscribe-refresh", 0, "re-fetch subscription every N seconds (0=disabled)")
+	logLevel := flag.String("log-level", "", "log level override: debug|info|warn|error")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 	if *showVersion {
@@ -42,7 +46,6 @@ func main() {
 		}
 		sub = cfg.SubscribeURL
 	} else {
-		// Minimal shell so listen defaults apply when only -subscribe is given.
 		cfg = &config.Client{SubscribeURL: sub}
 		cfg, err = config.NormalizeClient(cfg)
 		if err != nil {
@@ -65,7 +68,8 @@ func main() {
 		fetched.ProxyChannels = channels
 		fetched.SubscribeURL = sub
 		fetched.SubscribeRefreshSec = refresh
-		// Preserve local listen / auth from existing file when present.
+		fetched.Log = cfg.Log
+		fetched.Mgmt = cfg.Mgmt
 		if cfg.SOCKSListen != "" {
 			fetched.SOCKSListen = cfg.SOCKSListen
 		}
@@ -99,9 +103,119 @@ func main() {
 		log.Fatal("config has no inline credentials; set subscribe_url or certificate/key/certificate_authority")
 	}
 
-	if err := appclient.RunConfig(ctx, cfg, log.Default(), *configPath); err != nil && !errors.Is(err, context.Canceled) {
-		log.Fatal(err)
+	level := logx.ParseLevel(cfg.Log.Level)
+	if *logLevel != "" {
+		level = logx.ParseLevel(*logLevel)
 	}
+	lx := logx.New(level)
+	started := time.Now()
+
+	var rt *appclient.Runtime
+	runErrCh := make(chan error, 1)
+	go func() {
+		_, err := appclient.RunConfig(ctx, cfg, nil, *configPath, &appclient.RunOptions{Logx: lx, Runtime: &rt})
+		runErrCh <- err
+	}()
+
+	// Wait briefly for runtime to come up for status hooks.
+	deadline := time.Now().Add(3 * time.Second)
+	for rt == nil && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	store := &mgmt.FileConfigStore{PathName: *configPath, Role: mgmt.RoleClient, Client: cfg, Logger: lx}
+	svc := &clientService{rt: &rt, stop: stop, cfgPath: *configPath, lx: lx}
+	if cfg.Mgmt.Listen != "" {
+		go func() {
+			err := mgmt.ListenAndServe(ctx, mgmt.Options{
+				Listen:       cfg.Mgmt.Listen,
+				Secret:       cfg.Mgmt.Secret,
+				CORSOrigin:   cfg.Mgmt.CORSOrigin,
+				AllowUpgrade: cfg.Mgmt.AllowUpgrade,
+				ApplyRestart: cfg.Mgmt.ApplyRestart,
+				Role:         mgmt.RoleClient,
+				Unit:         "lynx-client",
+				Binary:       "lynx-client",
+				Logger:       lx,
+				StartedAt:    started,
+				Status: func() map[string]any {
+					if rt == nil {
+						return map[string]any{"ready": false}
+					}
+					return rt.Status()
+				},
+				Config:  store,
+				Service: svc,
+			})
+			if err != nil && ctx.Err() == nil {
+				lx.Error("mgmt server stopped", "err", err)
+			}
+		}()
+	}
+
+	if err := <-runErrCh; err != nil && !errors.Is(err, context.Canceled) {
+		lx.Error("client stopped", "err", err)
+		os.Exit(1)
+	}
+}
+
+type clientService struct {
+	rt     **appclient.Runtime
+	stop   context.CancelFunc
+	cfgPath string
+	lx     *logx.Logger
+}
+
+func (c *clientService) Restart() error {
+	if err := upgrade.RestartService("lynx-client"); err == nil {
+		return nil
+	}
+	return mgmt.SelfRestart(c.stop)
+}
+
+func (c *clientService) Reload() ([]string, bool, error) {
+	cfg, err := config.LoadClient(c.cfgPath)
+	if err != nil {
+		return nil, false, err
+	}
+	applied := []string{}
+	if c.lx != nil && cfg.Log.Level != "" {
+		c.lx.SetLevel(logx.ParseLevel(cfg.Log.Level))
+		applied = append(applied, "log.level")
+	}
+	return applied, true, nil
+}
+
+func (c *clientService) Reconnect() error {
+	if c.rt == nil || *c.rt == nil {
+		return fmt.Errorf("runtime not ready")
+	}
+	return (*c.rt).Reconnect()
+}
+
+func (c *clientService) SubscribeRefresh() error {
+	cfg, err := config.LoadClient(c.cfgPath)
+	if err != nil {
+		return err
+	}
+	if cfg.SubscribeURL == "" {
+		return fmt.Errorf("subscribe_url not set")
+	}
+	fetched, _, err := subscribe.FetchAndApply(context.Background(), cfg.SubscribeURL, cfg.SOCKSListen, cfg.HTTPListen)
+	if err != nil {
+		return err
+	}
+	fetched.ProxyChannels = cfg.ProxyChannels
+	fetched.SubscribeURL = cfg.SubscribeURL
+	fetched.SubscribeRefreshSec = cfg.SubscribeRefreshSec
+	fetched.Log = cfg.Log
+	fetched.Mgmt = cfg.Mgmt
+	fetched.Mode = cfg.Mode
+	if cfg.ProxyUsername != "" {
+		fetched.ProxyUsername = cfg.ProxyUsername
+		fetched.ProxyPassword = cfg.ProxyPassword
+	}
+	return config.WriteClient(c.cfgPath, fetched)
 }
 
 func refreshLoop(ctx context.Context, configPath, sub, socks, httpListen string, channels int, every time.Duration) {

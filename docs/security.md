@@ -2,7 +2,7 @@
 
 **English** | [中文](security.zh-CN.md)
 
-Threat model, trust boundaries, and controls for Lynx **v2.2.2**.
+Threat model, trust boundaries, and controls for Lynx **v2.3.0**.
 
 ## What Lynx is (and is not)
 
