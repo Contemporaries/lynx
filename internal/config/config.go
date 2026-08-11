@@ -31,6 +31,20 @@ type Security struct {
 	MaxSubscribePerTokenPerMin int `json:"max_subscribe_per_token_per_min"`
 }
 
+// LogConfig controls process log verbosity.
+type LogConfig struct {
+	Level string `json:"level,omitempty"` // debug|info|warn|error
+}
+
+// MgmtConfig enables the optional management API.
+type MgmtConfig struct {
+	Listen       string `json:"listen,omitempty"`        // e.g. 127.0.0.1:9090; empty = disabled
+	Secret       string `json:"secret,omitempty"`        // Bearer token
+	CORSOrigin   string `json:"cors_origin,omitempty"`   // optional Access-Control-Allow-Origin
+	AllowUpgrade bool   `json:"allow_upgrade,omitempty"` // permit POST /api/v1/upgrade
+	ApplyRestart bool   `json:"apply_restart,omitempty"` // auto-restart after config write
+}
+
 type Server struct {
 	DirectListen            string                `json:"direct_listen"`
 	WSListen                string                `json:"ws_listen"`
@@ -38,16 +52,18 @@ type Server struct {
 	// PublicBaseURL is the external HTTPS base for subscribe links (direct domain via nginx).
 	PublicBaseURL string `json:"public_base_url"`
 	// CDNBaseURL is the Cloudflare hostname base used to build ws_url in subscribe profiles.
-	CDNBaseURL          string `json:"cdn_base_url"`
-	SubscribePathPrefix string `json:"subscribe_path_prefix"`
-	CertFile                string                `json:"cert_file"`
-	KeyFile                 string                `json:"key_file"`
-	ClientCAFile            string                `json:"client_ca_file"`
-	Clients                 map[string]ClientAuth `json:"clients"`
-	AllowPrivateNetworks    bool                  `json:"allow_private_networks"`
-	MaxProxyFlowsPerSession int                   `json:"max_proxy_flows_per_session"`
-	ProxyDialTimeoutSeconds int                   `json:"proxy_dial_timeout_seconds"`
-	Security                Security              `json:"security"`
+	CDNBaseURL          string                `json:"cdn_base_url"`
+	SubscribePathPrefix string                `json:"subscribe_path_prefix"`
+	CertFile            string                `json:"cert_file"`
+	KeyFile             string                `json:"key_file"`
+	ClientCAFile        string                `json:"client_ca_file"`
+	Clients             map[string]ClientAuth `json:"clients"`
+	AllowPrivateNetworks    bool              `json:"allow_private_networks"`
+	MaxProxyFlowsPerSession int               `json:"max_proxy_flows_per_session"`
+	ProxyDialTimeoutSeconds int               `json:"proxy_dial_timeout_seconds"`
+	Security                Security          `json:"security"`
+	Log                     LogConfig         `json:"log,omitempty"`
+	Mgmt                    MgmtConfig        `json:"mgmt,omitempty"`
 }
 
 // Client is a single-file JSON config (sing-box style): TLS material is inline PEM.
@@ -71,6 +87,8 @@ type Client struct {
 	PingIntervalSeconds  int    `json:"ping_interval_seconds,omitempty"`
 	PongTimeoutMisses    int    `json:"pong_timeout_misses,omitempty"`
 	SubscribeRefreshSec  int    `json:"subscribe_refresh_seconds,omitempty"`
+	Log                  LogConfig  `json:"log,omitempty"`
+	Mgmt                 MgmtConfig `json:"mgmt,omitempty"`
 }
 
 func (s Security) HandshakeTimeout() time.Duration {
@@ -230,6 +248,120 @@ func WriteClient(path string, cfg *Client) error {
 	}
 	b = append(b, '\n')
 	return os.WriteFile(path, b, 0o600)
+}
+
+// WriteServer writes cfg as pretty JSON to path (mode 0600).
+func WriteServer(path string, cfg *Server) error {
+	b, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	return os.WriteFile(path, b, 0o600)
+}
+
+// RedactClient returns a copy safe for API responses (PEMs/secrets masked).
+func RedactClient(c *Client) map[string]any {
+	if c == nil {
+		return nil
+	}
+	return map[string]any{
+		"mode":                      c.Mode,
+		"subscribe_url":             maskURLToken(c.SubscribeURL),
+		"direct_addr":               c.DirectAddr,
+		"direct_server_name":        c.DirectServerName,
+		"ws_url":                    c.WSURL,
+		"ws_inner_server_name":      c.WSInnerServerName,
+		"certificate":               maskPEM(c.Certificate),
+		"key":                       maskSecret(c.Key),
+		"certificate_authority":     maskPEM(c.CertificateAuthority),
+		"cf_access_client_id":       c.CFAccessClientID,
+		"cf_access_client_secret":   maskSecret(c.CFAccessClientSecret),
+		"socks_listen":              c.SOCKSListen,
+		"http_listen":               c.HTTPListen,
+		"proxy_channels":            c.ProxyChannels,
+		"proxy_username":            c.ProxyUsername,
+		"proxy_password":            maskSecret(c.ProxyPassword),
+		"ping_interval_seconds":     c.PingIntervalSeconds,
+		"pong_timeout_misses":       c.PongTimeoutMisses,
+		"subscribe_refresh_seconds": c.SubscribeRefreshSec,
+		"log":                       c.Log,
+		"mgmt": map[string]any{
+			"listen":        c.Mgmt.Listen,
+			"secret":        maskSecret(c.Mgmt.Secret),
+			"cors_origin":   c.Mgmt.CORSOrigin,
+			"allow_upgrade": c.Mgmt.AllowUpgrade,
+			"apply_restart": c.Mgmt.ApplyRestart,
+		},
+	}
+}
+
+// RedactServer returns a copy safe for API responses.
+func RedactServer(s *Server) map[string]any {
+	if s == nil {
+		return nil
+	}
+	clients := map[string]any{}
+	for name, auth := range s.Clients {
+		clients[name] = map[string]any{
+			"certificate_sha256": auth.CertificateSHA256,
+			"enabled":            auth.Enabled,
+			"subscribe_token":    maskSecret(auth.SubscribeToken),
+			"cert_file":          auth.CertFile,
+			"key_file":           auth.KeyFile,
+		}
+	}
+	return map[string]any{
+		"direct_listen":              s.DirectListen,
+		"ws_listen":                  s.WSListen,
+		"ws_path":                    s.WSPath,
+		"public_base_url":            s.PublicBaseURL,
+		"cdn_base_url":               s.CDNBaseURL,
+		"subscribe_path_prefix":      s.SubscribePathPrefix,
+		"cert_file":                  s.CertFile,
+		"key_file":                   s.KeyFile,
+		"client_ca_file":             s.ClientCAFile,
+		"clients":                    clients,
+		"allow_private_networks":     s.AllowPrivateNetworks,
+		"max_proxy_flows_per_session": s.MaxProxyFlowsPerSession,
+		"proxy_dial_timeout_seconds": s.ProxyDialTimeoutSeconds,
+		"security":                   s.Security,
+		"log":                        s.Log,
+		"mgmt": map[string]any{
+			"listen":        s.Mgmt.Listen,
+			"secret":        maskSecret(s.Mgmt.Secret),
+			"cors_origin":   s.Mgmt.CORSOrigin,
+			"allow_upgrade": s.Mgmt.AllowUpgrade,
+			"apply_restart": s.Mgmt.ApplyRestart,
+		},
+	}
+}
+
+func maskSecret(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return ""
+	}
+	return "***"
+}
+
+func maskPEM(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return ""
+	}
+	return "***PEM***"
+}
+
+func maskURLToken(u string) string {
+	u = strings.TrimSpace(u)
+	if u == "" {
+		return ""
+	}
+	// Hide the last path segment (subscribe token).
+	i := strings.LastIndex(u, "/")
+	if i < 0 || i == len(u)-1 {
+		return u
+	}
+	return u[:i+1] + "***"
 }
 
 func NormalizeFingerprint(fp string) string {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-VERSION="2.2.2"
+VERSION="2.3.0"
 SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SOURCE_ROOT="$(cd "$(dirname "$SELF_PATH")" && pwd)"
 RUNTIME_ROOT="/usr/local/lib/lynx"
@@ -524,7 +524,7 @@ show_subscribe() {
   [[ -f "$SERVER_CONFIG" ]] || die "未找到 $SERVER_CONFIG"
   info "二进制版本…"
   if [[ -x /usr/local/bin/lynx-server ]]; then
-    /usr/local/bin/lynx-server -version 2>/dev/null || warn "当前 lynx-server 无 -version，请安装 v2.2.2+ 二进制"
+    /usr/local/bin/lynx-server -version 2>/dev/null || warn "当前 lynx-server 无 -version，请安装 v2.3.0+ 二进制"
   fi
   info "本机 origin 探测…"
   local verbody health
@@ -537,7 +537,7 @@ show_subscribe() {
   [[ -n "$health" ]] && printf 'health: %s\n' "$health"
   if [[ "$health" == *"404 page not found"* ]] || [[ "$verbody" == *"404 page not found"* ]]; then
     warn "8080 上没有订阅路由：正在运行的是不含 subscribe 的旧二进制。"
-    warn "请执行：sudo ./deploy/upgrade-server.sh v2.2.2 && sudo systemctl restart lynx-server"
+    warn "请执行：sudo ./deploy/upgrade-server.sh v2.3.0 && sudo systemctl restart lynx-server"
     warn "然后再次：curl -sS http://127.0.0.1:8080/_lynx/v1/version"
   fi
   # Port conflict hint

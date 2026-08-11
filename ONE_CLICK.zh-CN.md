@@ -2,7 +2,7 @@
 
 [English](ONE_CLICK.md) | **中文**
 
-Lynx **v2.2.2**（Linux）：本机 SOCKS5/HTTP；订阅走 nginx **443**；可选直连 mTLS **8443**；WSS 走 Cloudflare Tunnel。
+Lynx **v2.3.0**（Linux）：本机 SOCKS5/HTTP；订阅走 nginx **443**；可选直连 mTLS **8443**；WSS 走 Cloudflare Tunnel。
 
 ## 1. 准备
 

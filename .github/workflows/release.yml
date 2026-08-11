@@ -45,6 +45,22 @@ jobs:
             goarch: amd64
             artifact: lynx-client-windows-amd64.exe
             pkg: lynx-client
+          - goos: linux
+            goarch: amd64
+            artifact: lynx-web-server-linux-amd64
+            pkg: lynx-web-server
+          - goos: linux
+            goarch: arm64
+            artifact: lynx-web-server-linux-arm64
+            pkg: lynx-web-server
+          - goos: linux
+            goarch: amd64
+            artifact: lynx-web-client-linux-amd64
+            pkg: lynx-web-client
+          - goos: linux
+            goarch: arm64
+            artifact: lynx-web-client-linux-arm64
+            pkg: lynx-web-client
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6

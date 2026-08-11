@@ -22,17 +22,25 @@ build_one linux arm64 lynx-server lynx-server-linux-arm64
 build_one linux amd64 lynx-client lynx-client-linux-amd64
 build_one linux arm64 lynx-client lynx-client-linux-arm64
 build_one windows amd64 lynx-client lynx-client-windows-amd64.exe
+build_one linux amd64 lynx-web-server lynx-web-server-linux-amd64
+build_one linux arm64 lynx-web-server lynx-web-server-linux-arm64
+build_one linux amd64 lynx-web-client lynx-web-client-linux-amd64
+build_one linux arm64 lynx-web-client lynx-web-client-linux-arm64
 
 cp -f dist/lynx-server-linux-amd64 dist/lynx-server
 cp -f dist/lynx-client-linux-amd64 dist/lynx-client
+cp -f dist/lynx-web-server-linux-amd64 dist/lynx-web-server
+cp -f dist/lynx-web-client-linux-amd64 dist/lynx-web-client
 
 (
   cd dist
   sha256sum \
-    lynx-server lynx-client \
+    lynx-server lynx-client lynx-web-server lynx-web-client \
     lynx-server-linux-amd64 lynx-server-linux-arm64 \
     lynx-client-linux-amd64 lynx-client-linux-arm64 \
     lynx-client-windows-amd64.exe \
+    lynx-web-server-linux-amd64 lynx-web-server-linux-arm64 \
+    lynx-web-client-linux-amd64 lynx-web-client-linux-arm64 \
     > SHA256SUMS
 )
 echo "artifacts written to dist/ (version=$VERSION)"

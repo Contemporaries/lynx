@@ -2,7 +2,7 @@
 
 [English](configuration.md) | **中文**
 
-Lynx **v2.2.2** 分步配置：端口、nginx 订阅、server/client JSON、验证。Tunnel/Access 详见 [cloudflare.zh-CN.md](cloudflare.zh-CN.md)；威胁模型与控制项见 [security.zh-CN.md](security.zh-CN.md)。
+Lynx **v2.3.0** 分步配置：端口、nginx 订阅、server/client JSON、验证。Tunnel/Access 详见 [cloudflare.zh-CN.md](cloudflare.zh-CN.md)；威胁模型与控制项见 [security.zh-CN.md](security.zh-CN.md)。
 
 ## 架构（端口）
 
@@ -87,6 +87,8 @@ curl -sS "https://subscribe.example.com/_lynx/v1/subscribe/<token>" | head
 | `clients.<name>` | 每设备授权与订阅材料 |
 | `allow_private_networks` | 默认 `false` |
 | `security` | 限流 — 见 [security.zh-CN.md](security.zh-CN.md) |
+| `log.level` | `debug`/`info`/`warn`/`error` — 见 [logging.zh-CN.md](logging.zh-CN.md) |
+| `mgmt` | 可选管理 API — 见 [mgmt-api.zh-CN.md](mgmt-api.zh-CN.md) / [webui.zh-CN.md](webui.zh-CN.md) |
 
 ### 设备条目
 

@@ -18,25 +18,31 @@ import (
 	"time"
 
 	"github.com/Contemporaries/lynx/internal/config"
+	"github.com/Contemporaries/lynx/internal/logx"
+	"github.com/Contemporaries/lynx/internal/mgmt"
 	"github.com/Contemporaries/lynx/internal/proto"
 	"github.com/Contemporaries/lynx/internal/proxymux"
 	"github.com/Contemporaries/lynx/internal/subscribe"
 	"github.com/Contemporaries/lynx/internal/tlsutil"
 	"github.com/Contemporaries/lynx/internal/transport"
+	"github.com/Contemporaries/lynx/internal/upgrade"
 	"github.com/Contemporaries/lynx/internal/version"
 )
 
 type server struct {
 	cfg      *config.Server
+	lx       *logx.Logger
 	mu       sync.Mutex
 	sessions map[string]int // fingerprint -> count
 	byIP     map[string]int
 	total    int
 	flows    map[string]int // fingerprint -> active flows
+	started  time.Time
 }
 
 func main() {
 	configPath := flag.String("config", "/etc/lynx/server.json", "server JSON config")
+	logLevel := flag.String("log-level", "", "log level override: debug|info|warn|error")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 	if *showVersion {
@@ -49,11 +55,20 @@ func main() {
 		log.Fatal(err)
 	}
 
+	level := logx.ParseLevel(cfg.Log.Level)
+	if *logLevel != "" {
+		level = logx.ParseLevel(*logLevel)
+	}
+	lx := logx.New(level)
+	started := time.Now()
+
 	s := &server{
 		cfg:      cfg,
+		lx:       lx,
 		sessions: make(map[string]int),
 		byIP:     make(map[string]int),
 		flows:    make(map[string]int),
+		started:  started,
 	}
 
 	cert, err := tlsutil.LoadCert(cfg.CertFile, cfg.KeyFile)
@@ -83,12 +98,37 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	store := &mgmt.FileConfigStore{PathName: *configPath, Role: mgmt.RoleServer, Server: cfg, Logger: lx}
+	svc := &serverService{stop: stop, cfgPath: *configPath, lx: lx, srv: s}
+	if cfg.Mgmt.Listen != "" {
+		go func() {
+			err := mgmt.ListenAndServe(ctx, mgmt.Options{
+				Listen:       cfg.Mgmt.Listen,
+				Secret:       cfg.Mgmt.Secret,
+				CORSOrigin:   cfg.Mgmt.CORSOrigin,
+				AllowUpgrade: cfg.Mgmt.AllowUpgrade,
+				ApplyRestart: cfg.Mgmt.ApplyRestart,
+				Role:         mgmt.RoleServer,
+				Unit:         "lynx-server",
+				Binary:       "lynx-server",
+				Logger:       lx,
+				StartedAt:    started,
+				Status:       s.status,
+				Config:       store,
+				Service:      svc,
+			})
+			if err != nil && ctx.Err() == nil {
+				lx.Error("mgmt server stopped", "err", err)
+			}
+		}()
+	}
+
 	go func() {
-		log.Printf("direct TLS listening on %s", cfg.DirectListen)
+		lx.Info("direct TLS listening", "addr", cfg.DirectListen)
 		if err := transport.ServeDirect(ctx, cfg.DirectListen, directTLS, cfg.Security.HandshakeTimeout(), func(sess transport.Session) {
 			s.handleSession(ctx, sess)
 		}); err != nil && ctx.Err() == nil {
-			log.Printf("direct server: %v", err)
+			lx.Error("direct server", "err", err)
 			stop()
 		}
 	}()
@@ -106,12 +146,19 @@ func main() {
 			MaxPerTokenPerMin: cfg.Security.MaxSubscribePerTokenPerMin,
 		})
 		nTok := sub.TokenCount()
-		log.Printf("lynx-server %s origin http://%s (ws=%s subscribe=%s tokens=%d public=%s cdn=%s)",
-			version.Version, cfg.WSListen, cfg.WSPath, cfg.SubscribePathPrefix, nTok, cfg.PublicBaseURL, cfg.CDNBaseURL)
+		lx.Info("lynx-server origin",
+			"version", version.Version,
+			"listen", cfg.WSListen,
+			"ws", cfg.WSPath,
+			"subscribe", cfg.SubscribePathPrefix,
+			"tokens", nTok,
+			"public", cfg.PublicBaseURL,
+			"cdn", cfg.CDNBaseURL,
+		)
 		if nTok == 0 {
-			log.Printf("WARNING: no subscribe_token configured; GET %s<token> will always 404. Set clients.*.subscribe_token in server.json", cfg.SubscribePathPrefix)
+			lx.Warn("no subscribe_token configured; subscribe GET will always 404", "prefix", cfg.SubscribePathPrefix)
 		}
-		warnSubscribePortConflict(cfg)
+		warnSubscribePortConflict(cfg, lx)
 		if err := transport.ServeWebSocket(ctx, cfg.WSListen, cfg.WSPath, innerTLS, func(sess transport.Session) {
 			s.handleSession(ctx, sess)
 		}, func(mux *http.ServeMux) {
@@ -119,21 +166,76 @@ func main() {
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				_, _ = fmt.Fprintf(w, `{"service":"lynx-server","version":%q,"subscribe_tokens":%d}`+"\n", version.Version, nTok)
 			})
-			// Health (no token): distinguishes "route missing" from "bad token".
 			mux.HandleFunc(strings.TrimSuffix(sub.Prefix(), "/"), sub.ServeHealth)
 			mux.Handle(sub.Prefix(), sub)
 		}); err != nil && ctx.Err() == nil {
-			log.Printf("WebSocket server: %v", err)
+			lx.Error("WebSocket server", "err", err)
 			stop()
 		}
 	}()
 
 	<-ctx.Done()
-	log.Printf("shutting down")
+	lx.Info("shutting down")
 }
 
-func warnSubscribePortConflict(cfg *config.Server) {
-	// public_base_url host:port must not collide with direct_listen (mTLS).
+type serverService struct {
+	stop    context.CancelFunc
+	cfgPath string
+	lx      *logx.Logger
+	srv     *server
+}
+
+func (c *serverService) Restart() error {
+	if err := upgrade.RestartService("lynx-server"); err == nil {
+		return nil
+	}
+	return mgmt.SelfRestart(c.stop)
+}
+
+func (c *serverService) Reload() ([]string, bool, error) {
+	cfg, err := config.LoadServer(c.cfgPath)
+	if err != nil {
+		return nil, false, err
+	}
+	applied := []string{}
+	if c.lx != nil && cfg.Log.Level != "" {
+		c.lx.SetLevel(logx.ParseLevel(cfg.Log.Level))
+		applied = append(applied, "log.level")
+	}
+	return applied, true, nil
+}
+
+func (c *serverService) Reconnect() error         { return fmt.Errorf("not supported on server") }
+func (c *serverService) SubscribeRefresh() error { return fmt.Errorf("not supported on server") }
+
+func (s *server) status() map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	activeFlows := 0
+	for _, n := range s.flows {
+		activeFlows += n
+	}
+	return map[string]any{
+		"direct_listen":   s.cfg.DirectListen,
+		"ws_listen":       s.cfg.WSListen,
+		"ws_path":         s.cfg.WSPath,
+		"sessions":        s.total,
+		"active_flows":    activeFlows,
+		"clients_enabled": countEnabled(s.cfg.Clients),
+	}
+}
+
+func countEnabled(clients map[string]config.ClientAuth) int {
+	n := 0
+	for _, c := range clients {
+		if c.Enabled {
+			n++
+		}
+	}
+	return n
+}
+
+func warnSubscribePortConflict(cfg *config.Server, lx *logx.Logger) {
 	pub := strings.TrimPrefix(strings.TrimPrefix(cfg.PublicBaseURL, "https://"), "http://")
 	if !strings.Contains(pub, ":") {
 		return
@@ -141,7 +243,6 @@ func warnSubscribePortConflict(cfg *config.Server) {
 	pubPort := pub[strings.LastIndex(pub, ":")+1:]
 	_, directPort, err := net.SplitHostPort(cfg.DirectListen)
 	if err != nil {
-		// ":8443" form
 		if strings.HasPrefix(cfg.DirectListen, ":") {
 			directPort = strings.TrimPrefix(cfg.DirectListen, ":")
 		} else {
@@ -149,7 +250,8 @@ func warnSubscribePortConflict(cfg *config.Server) {
 		}
 	}
 	if pubPort != "" && pubPort == directPort {
-		log.Printf("WARNING: public_base_url port %s equals direct_listen %s — nginx subscribe cannot share the mTLS direct port; use https://host (443) for subscribe and :8443 for direct", pubPort, cfg.DirectListen)
+		lx.Warn("public_base_url port equals direct_listen — nginx subscribe cannot share the mTLS direct port",
+			"public_port", pubPort, "direct_listen", cfg.DirectListen)
 	}
 }
 
@@ -157,31 +259,31 @@ func (s *server) handleSession(parent context.Context, tr transport.Session) {
 	defer tr.Close()
 	fp := config.NormalizeFingerprint(tr.PeerCertificateSHA256())
 	if fp == "" {
-		log.Printf("%s peer has no client certificate", tr.Kind())
+		s.lx.Warn("peer has no client certificate", "kind", tr.Kind())
 		return
 	}
 	device, ok := s.authorize(fp)
 	if !ok {
 		_ = tr.WriteControl(proto.FrameError, []byte("unauthorized client certificate"))
-		log.Printf("rejected unauthorized client fingerprint=%s", fp[:16])
+		s.lx.Warn("rejected unauthorized client", "fingerprint", fp[:16])
 		return
 	}
 
 	srcIP := hostOnly(tr.RemoteAddr())
 	if !s.acquireSession(fp, srcIP) {
 		_ = tr.WriteControl(proto.FrameError, []byte("session limit exceeded"))
-		log.Printf("rejected client %s: session limit", device)
+		s.lx.Warn("rejected client: session limit", "device", device)
 		return
 	}
 	defer s.releaseSession(fp, srcIP)
 
 	typ, payload, err := tr.ReadControl()
 	if err != nil {
-		log.Printf("%s read hello: %v", tr.Kind(), err)
+		s.lx.Debug("read hello failed", "kind", tr.Kind(), "err", err)
 		return
 	}
 	if typ != proto.FrameHello {
-		log.Printf("%s expected hello, got 0x%x", tr.Kind(), typ)
+		s.lx.Warn("expected hello", "kind", tr.Kind(), "frame", fmt.Sprintf("0x%x", typ))
 		return
 	}
 	hello, err := proto.ReadJSON[proto.Hello](payload)
@@ -194,11 +296,14 @@ func (s *server) handleSession(parent context.Context, tr transport.Session) {
 		return
 	}
 
-	log.Printf("proxy client %s connected via %s", device, tr.Kind())
+	s.lx.Info("proxy client connected", "device", device, "path", tr.Kind())
 	err = proxymux.Serve(parent, tr, proxymux.ServerOptions{
 		MaxFlows:          s.cfg.MaxProxyFlowsPerSession,
 		MaxNewFlowsPerSec: s.cfg.Security.MaxNewFlowsPerSecond,
 		IdleTimeout:       s.cfg.Security.FlowIdleTimeout(),
+		Logger:            s.lx,
+		Device:            device,
+		Path:              tr.Kind(),
 		OnFlowOpen: func() bool {
 			return s.acquireFlow(fp)
 		},
@@ -213,7 +318,9 @@ func (s *server) handleSession(parent context.Context, tr transport.Session) {
 		},
 	})
 	if err != nil && !errors.Is(err, context.Canceled) {
-		log.Printf("proxy client %s disconnected: %v", device, err)
+		s.lx.Info("proxy client disconnected", "device", device, "err", err)
+	} else {
+		s.lx.Info("proxy client disconnected", "device", device)
 	}
 }
 

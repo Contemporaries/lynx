@@ -6,12 +6,21 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/Contemporaries/lynx/internal/proto"
 	"github.com/Contemporaries/lynx/internal/transport"
 )
+
+// FlowLogger is an optional traffic logger (typically *logx.Logger).
+type FlowLogger interface {
+	Debug(msg string, args ...any)
+	Info(msg string, args ...any)
+	Warn(msg string, args ...any)
+	Error(msg string, args ...any)
+}
 
 type ServerOptions struct {
 	MaxFlows          int
@@ -26,14 +35,24 @@ type ServerOptions struct {
 	IdleTimeout         time.Duration
 	OnFlowOpen          func() bool // optional gate; return false to reject
 	OnFlowClose         func()
+	Logger              FlowLogger // optional traffic logs
+	Device              string     // device name for log fields
+	Path                string     // "wss" | "direct"
 }
 
 type serverFlow struct {
-	id     uint32
-	kind   string // "tcp" or "udp"
-	conn   net.Conn
-	pc     net.PacketConn
-	cancel context.CancelFunc
+	id         uint32
+	kind       string // "tcp" or "udp"
+	target     string
+	conn       net.Conn
+	pc         net.PacketConn
+	cancel     context.CancelFunc
+	start      time.Time
+	up         int64
+	down       int64
+	packetsUp  int64
+	packetsDown int64
+	mu         sync.Mutex
 }
 
 type serverMux struct {
@@ -165,15 +184,19 @@ func (m *serverMux) openTCP(req proto.ProxyOpen) {
 	}
 	flow, errMsg := m.reserveFlow(req, "tcp")
 	if flow == nil {
+		m.logFlowDenied(req.FlowID, "tcp", req.Address, errMsg)
 		result.Error = errMsg
 		m.writeResult(result)
 		return
 	}
+	flow.target = req.Address
+	flow.start = time.Now()
 
 	go func() {
 		conn, err := m.opts.Dial(m.ctx, req.Address)
 		if err != nil {
 			m.removePending(req.FlowID)
+			m.logDialFailed(req.FlowID, req.Address, err)
 			result.Error = "target connection failed"
 			m.writeResult(result)
 			return
@@ -189,6 +212,7 @@ func (m *serverMux) openTCP(req proto.ProxyOpen) {
 		m.mu.Unlock()
 		result.OK = true
 		m.writeResult(result)
+		m.logFlowOpen(flow)
 		m.remoteToClient(flow)
 	}()
 }
@@ -197,15 +221,20 @@ func (m *serverMux) openUDP(req proto.ProxyOpen) {
 	result := proto.ProxyResult{FlowID: req.FlowID}
 	flow, errMsg := m.reserveFlow(req, "udp")
 	if flow == nil {
+		m.logFlowDenied(req.FlowID, "udp", "", errMsg)
 		result.Error = errMsg
 		m.writeResult(result)
 		return
 	}
+	flow.start = time.Now()
 
 	go func() {
 		pc, err := m.opts.DialUDP(m.ctx)
 		if err != nil {
 			m.removePending(req.FlowID)
+			if m.opts.Logger != nil {
+				m.opts.Logger.Error("udp associate failed", "id", req.FlowID, "device", m.opts.Device, "err", err)
+			}
 			result.Error = "udp associate failed"
 			m.writeResult(result)
 			return
@@ -221,8 +250,111 @@ func (m *serverMux) openUDP(req proto.ProxyOpen) {
 		m.mu.Unlock()
 		result.OK = true
 		m.writeResult(result)
+		m.logFlowOpen(flow)
 		m.udpRemoteToClient(flow)
 	}()
+}
+
+func (m *serverMux) logFlowOpen(flow *serverFlow) {
+	if m.opts.Logger == nil {
+		return
+	}
+	if flow.kind == "udp" {
+		args := []any{"id", flow.id, "net", "udp"}
+		if m.opts.Path != "" {
+			args = append(args, "path", m.opts.Path)
+		}
+		if m.opts.Device != "" {
+			args = append(args, "device", m.opts.Device)
+		}
+		m.opts.Logger.Info("udp associate open", args...)
+		return
+	}
+	args := []any{"id", flow.id, "net", "tcp", "target", flow.target}
+	if m.opts.Path != "" {
+		args = append(args, "path", m.opts.Path)
+	}
+	if m.opts.Device != "" {
+		args = append(args, "device", m.opts.Device)
+	}
+	m.opts.Logger.Info("flow open", args...)
+}
+
+func (m *serverMux) logFlowClose(flow *serverFlow) {
+	if m.opts.Logger == nil || flow == nil {
+		return
+	}
+	flow.mu.Lock()
+	up, down := flow.up, flow.down
+	pu, pd := flow.packetsUp, flow.packetsDown
+	flow.mu.Unlock()
+	dur := time.Since(flow.start).Round(time.Millisecond).String()
+	if flow.kind == "udp" {
+		args := []any{
+			"id", flow.id,
+			"packets_up", pu,
+			"packets_down", pd,
+			"bytes_up", up,
+			"bytes_down", down,
+			"duration", dur,
+		}
+		if m.opts.Path != "" {
+			args = append(args, "path", m.opts.Path)
+		}
+		if m.opts.Device != "" {
+			args = append(args, "device", m.opts.Device)
+		}
+		m.opts.Logger.Info("udp associate close", args...)
+		return
+	}
+	args := []any{
+		"id", flow.id,
+		"target", flow.target,
+		"ok", true,
+		"up", up,
+		"down", down,
+		"duration", dur,
+	}
+	if m.opts.Path != "" {
+		args = append(args, "path", m.opts.Path)
+	}
+	if m.opts.Device != "" {
+		args = append(args, "device", m.opts.Device)
+	}
+	m.opts.Logger.Info("flow close", args...)
+}
+
+func (m *serverMux) logFlowDenied(id uint32, netw, target, reason string) {
+	if m.opts.Logger == nil {
+		return
+	}
+	r := reason
+	switch {
+	case strings.Contains(reason, "rate limited"):
+		r = "rate_limited"
+	case strings.Contains(reason, "limit"):
+		r = "flow_limit"
+	}
+	args := []any{"id", id, "net", netw, "reason", r}
+	if target != "" {
+		args = append(args, "target", target)
+	}
+	if m.opts.Device != "" {
+		args = append(args, "device", m.opts.Device)
+	}
+	m.opts.Logger.Warn("flow denied", args...)
+}
+
+func (m *serverMux) logDialFailed(id uint32, target string, err error) {
+	if m.opts.Logger == nil {
+		return
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "not allowed") {
+		m.opts.Logger.Warn("flow denied", "id", id, "target", target, "reason", "private_network", "device", m.opts.Device)
+		return
+	}
+	m.opts.Logger.Error("flow dial failed", "id", id, "target", target, "device", m.opts.Device, "err", err)
 }
 
 func (m *serverMux) writeResult(result proto.ProxyResult) {
@@ -235,6 +367,9 @@ func (m *serverMux) remoteToClient(flow *serverFlow) {
 	for {
 		n, err := flow.conn.Read(buf)
 		if n > 0 {
+			flow.mu.Lock()
+			flow.down += int64(n)
+			flow.mu.Unlock()
 			if werr := m.tr.WriteControl(proto.FrameProxyData, proto.EncodeFlowPayload(flow.id, buf[:n])); werr != nil {
 				m.closeFlow(flow.id, false)
 				return
@@ -258,6 +393,10 @@ func (m *serverMux) udpRemoteToClient(flow *serverFlow) {
 		_ = flow.pc.SetReadDeadline(time.Now().Add(m.opts.IdleTimeout))
 		n, raddr, err := flow.pc.ReadFrom(buf)
 		if n > 0 && raddr != nil {
+			flow.mu.Lock()
+			flow.down += int64(n)
+			flow.packetsDown++
+			flow.mu.Unlock()
 			payload, encErr := proto.EncodeDatagram(flow.id, raddr.String(), buf[:n])
 			if encErr != nil {
 				continue
@@ -294,6 +433,9 @@ func (m *serverMux) writeFlow(id uint32, data []byte) error {
 		if n == 0 {
 			return io.ErrShortWrite
 		}
+		flow.mu.Lock()
+		flow.up += int64(n)
+		flow.mu.Unlock()
 		data = data[n:]
 	}
 	return nil
@@ -308,6 +450,10 @@ func (m *serverMux) writeDatagram(id uint32, addr string, data []byte) {
 	}
 	if m.opts.CheckUDPDestination != nil {
 		if err := m.opts.CheckUDPDestination(m.ctx, addr); err != nil {
+			if m.opts.Logger != nil {
+				m.opts.Logger.Warn("flow denied", "id", id, "target", addr, "reason", "private_network", "device", m.opts.Device)
+				m.opts.Logger.Debug("udp packet dropped", "id", id, "dst", addr, "err", err)
+			}
 			return
 		}
 	}
@@ -316,7 +462,16 @@ func (m *serverMux) writeDatagram(id uint32, addr string, data []byte) {
 		return
 	}
 	_ = flow.pc.SetWriteDeadline(time.Now().Add(15 * time.Second))
-	_, _ = flow.pc.WriteTo(data, raddr)
+	n, _ := flow.pc.WriteTo(data, raddr)
+	if n > 0 {
+		flow.mu.Lock()
+		flow.up += int64(n)
+		flow.packetsUp++
+		flow.mu.Unlock()
+	}
+	if m.opts.Logger != nil {
+		m.opts.Logger.Debug("udp packet up", "id", id, "dst", addr, "bytes", n)
+	}
 }
 
 func (m *serverMux) closeWrite(id uint32) {
@@ -366,6 +521,7 @@ func (m *serverMux) closeFlow(id uint32, notify bool) {
 	if notify {
 		_ = m.tr.WriteControl(proto.FrameProxyClose, proto.EncodeFlowID(id))
 	}
+	m.logFlowClose(flow)
 	if m.opts.OnFlowClose != nil {
 		m.opts.OnFlowClose()
 	}
@@ -389,6 +545,7 @@ func (m *serverMux) closeAll() {
 		if flow.pc != nil {
 			_ = flow.pc.Close()
 		}
+		m.logFlowClose(flow)
 		if m.opts.OnFlowClose != nil {
 			m.opts.OnFlowClose()
 		}

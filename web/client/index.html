@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lynx Client</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Syne:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="bg"></div>
+  <header class="top">
+    <div class="brand">Lynx <span>Client</span></div>
+    <nav>
+      <button data-page="overview" class="active">Overview</button>
+      <button data-page="config">Config</button>
+      <button data-page="service">Service</button>
+      <button data-page="logs">Logs</button>
+      <button data-page="settings">Settings</button>
+    </nav>
+  </header>
+  <main>
+    <section id="overview" class="page active">
+      <h1>Overview</h1>
+      <p class="lede">Current path, channels, and local proxy listeners.</p>
+      <div id="overview-body" class="grid"></div>
+    </section>
+    <section id="config" class="page">
+      <h1>Config</h1>
+      <p class="lede">Edit client.json via the management API.</p>
+      <textarea id="config-json" spellcheck="false"></textarea>
+      <div class="actions">
+        <button id="cfg-save" class="primary">Save</button>
+        <button id="cfg-save-restart" class="danger">Save & restart</button>
+      </div>
+      <pre id="cfg-msg" class="msg"></pre>
+    </section>
+    <section id="service" class="page">
+      <h1>Service</h1>
+      <p class="lede">Restart, reconnect channels, refresh subscribe, or upgrade.</p>
+      <div class="actions">
+        <button id="svc-restart" class="danger">Restart</button>
+        <button id="svc-reconnect" class="primary">Reconnect</button>
+        <button id="svc-subscribe" class="primary">Subscribe refresh</button>
+        <button id="svc-upgrade" class="primary">Upgrade to latest</button>
+      </div>
+      <label class="field">Tag (optional)<input id="upgrade-tag" placeholder="v2.3.0 or empty for latest" /></label>
+      <pre id="svc-msg" class="msg"></pre>
+    </section>
+    <section id="logs" class="page">
+      <h1>Logs</h1>
+      <p class="lede">Streaming process log (SSE).</p>
+      <label class="field">Level
+        <select id="log-level">
+          <option>debug</option>
+          <option selected>info</option>
+          <option>warn</option>
+          <option>error</option>
+        </select>
+      </label>
+      <pre id="log-view" class="log"></pre>
+    </section>
+    <section id="settings" class="page">
+      <h1>Settings</h1>
+      <p class="lede">Management API connection for this UI.</p>
+      <label class="field">API base<input id="api-base" placeholder="http://127.0.0.1:9091" /></label>
+      <label class="field">Bearer secret<input id="api-secret" type="password" /></label>
+      <div class="actions"><button id="settings-save" class="primary">Save connection</button></div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

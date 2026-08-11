@@ -4,5 +4,12 @@
   "http_listen": "127.0.0.1:8080",
   "proxy_channels": 3,
   "ping_interval_seconds": 20,
-  "pong_timeout_misses": 3
+  "pong_timeout_misses": 3,
+  "log": { "level": "info" },
+  "mgmt": {
+    "listen": "127.0.0.1:9091",
+    "secret": "REPLACE_WITH_RANDOM_SECRET",
+    "cors_origin": "*",
+    "allow_upgrade": true
+  }
 }

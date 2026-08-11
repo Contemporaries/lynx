@@ -31,5 +31,12 @@
     "flow_idle_timeout_seconds": 600,
     "max_subscribe_per_ip_per_min": 30,
     "max_subscribe_per_token_per_min": 10
+  },
+  "log": { "level": "info" },
+  "mgmt": {
+    "listen": "127.0.0.1:9090",
+    "secret": "REPLACE_WITH_RANDOM_SECRET",
+    "cors_origin": "*",
+    "allow_upgrade": true
   }
 }
